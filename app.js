@@ -146,10 +146,10 @@
   function fitAll(dur = 900) {
     const vp = pages.filter(visible);
     const xs = vp.map(p => p.x), ys = vp.map(p => p.y);
-    const minX = Math.min(...xs) - 120, maxX = Math.max(...xs) + 120, minY = Math.min(...ys) - 120, maxY = Math.max(...ys) + 120;
-    const kk = Math.min(W / (maxX - minX), (H - 120) / (maxY - minY)) * 0.94;
+    const minX = Math.min(...xs) - 150, maxX = Math.max(...xs) + 150, minY = Math.min(...ys) - 170, maxY = Math.max(...ys) + 170;
+    const kk = Math.min((W - 60) / (maxX - minX), (H - 200) / (maxY - minY)) * 0.96;
     const cx = (minX + maxX) / 2, cy = (minY + maxY) / 2;
-    const t = d3.zoomIdentity.translate(W / 2 - cx * kk, H / 2 + 20 - cy * kk).scale(kk);
+    const t = d3.zoomIdentity.translate(W / 2 - cx * kk, H / 2 + 12 - cy * kk).scale(kk);
     d3.select(canvas).transition().duration(dur).ease(d3.easeCubicInOut).call(zoom.transform, t);
   }
   function zoomTo(n, kk, dur = 1100) {
@@ -221,11 +221,18 @@
         ctx.beginPath(); ctx.arc(cx, cy, rr, 0, Math.PI * 2);
         ctx.fillStyle = rgba(l.color, 0.05 * lobeVis); ctx.fill();
         ctx.lineWidth = sw(1); ctx.strokeStyle = rgba(l.color, 0.22 * lobeVis); ctx.stroke();
+        // labels sit on the outward side of the ring so neighbouring lobes never stack their text
+        const dl = Math.hypot(cx, cy) || 1, ux = dl > 1 ? cx / dl : 0, uy = dl > 1 ? cy / dl : -1;
+        const ax = cx + ux * (rr + sw(14)), ay = cy + uy * (rr + sw(14)), lh = sw(fs + 6);
+        ctx.textAlign = Math.abs(ux) < 0.35 ? 'center' : ux > 0 ? 'left' : 'right';
+        ctx.textBaseline = 'middle';
+        const top = uy < 0;
         ctx.fillStyle = rgba(l.color, 0.85 * lobeVis);
-        ctx.fillText(l.name, cx, cy - rr - sw(10));
+        ctx.fillText(l.name, ax, top ? ay - lh : ay);
         ctx.font = `500 ${sw(Math.min(W / 32, 12))}px 'Satoshi', sans-serif`;
         ctx.fillStyle = rgba('#a7b2cc', 0.8 * lobeVis);
-        ctx.fillText(`${ps.length} neurons · ${d3.sum(ps, p => p.nSyn)} synapses`, cx, cy + rr + sw(15));
+        ctx.fillText(`${ps.length} neurons · ${d3.sum(ps, p => p.nSyn)} synapses`, ax, top ? ay : ay + lh);
+        ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic';
       });
     }
 
@@ -565,11 +572,11 @@
   (() => {
     const vp = pages.filter(visible);
     const xs = vp.map(p => p.x), ys = vp.map(p => p.y);
-    const minX = Math.min(...xs) - 120, maxX = Math.max(...xs) + 120, minY = Math.min(...ys) - 120, maxY = Math.max(...ys) + 120;
-    const kk = Math.min(W / (maxX - minX), (H - 120) / (maxY - minY)) * 0.94;
-    const t = d3.zoomIdentity.translate(W / 2 - (minX + maxX) / 2 * kk, H / 2 - (minY + maxY) / 2 * kk).scale(kk * 0.6);
+    const minX = Math.min(...xs) - 150, maxX = Math.max(...xs) + 150, minY = Math.min(...ys) - 170, maxY = Math.max(...ys) + 170;
+    const kk = Math.min((W - 60) / (maxX - minX), (H - 200) / (maxY - minY)) * 0.96;
+    const t = d3.zoomIdentity.translate(W / 2 - (minX + maxX) / 2 * kk, H / 2 + 12 - (minY + maxY) / 2 * kk).scale(kk * 0.6);
     d3.select(canvas).call(zoom.transform, t);
-    d3.select(canvas).transition().duration(1600).ease(d3.easeCubicOut).call(zoom.transform, d3.zoomIdentity.translate(W / 2 - (minX + maxX) / 2 * kk, H / 2 - (minY + maxY) / 2 * kk).scale(kk));
+    d3.select(canvas).transition().duration(1600).ease(d3.easeCubicOut).call(zoom.transform, d3.zoomIdentity.translate(W / 2 - (minX + maxX) / 2 * kk, H / 2 + 12 - (minY + maxY) / 2 * kk).scale(kk));
   })();
   updateLevel();
   requestAnimationFrame(draw);
