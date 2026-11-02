@@ -19,6 +19,7 @@ Date: 2026-11-02. Prepared by Perplexity Computer after the sub-neuron release a
 |---|---|
 | `index.html` | Projects brain shell; `nav.brains` links to `life.html` and `programming.html` |
 | `life.html` | Life brain shell; identical markup except the `.on` link and `<script src="./life-data.js">` |
+| `build.html`, `build.js`, `build.css`, `build-questions.js` | Build module: interview-driven brain builder with its own canvas renderer, IndexedDB storage, Save/Open JSON (files embedded as base64), Questions manager, Explode-to-explorer iframe. Questions/categories/templates live in `build-questions.js`. |
 | `build_demo_data.py` | fictional Projects brain: 70 pages (20 sub-neurons under Tidewatch 7, Hollow Pines 7, Orbit Kitchen 6), 616 synapses, 94 sources. Prefix map decides parents. Code host is `git.example.test`. |
 | `build_life_demo_data.py` | fictional Life brain: 86 pages (22 sub-neurons under 8 parents, e.g. `money/overview` 6, `studio/repos` 5, `home/saltmarsh-house` 4), 257 synapses, 201 sources. Source helpers `SES GM CAL SP GH MEM WIKI WEB BANK_*` all emit reserved hosts. |
 | `programming.html` | Programming brain shell; same markup, `<script src="./programming-data.js">` |

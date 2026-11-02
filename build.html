@@ -1,0 +1,183 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MindBlown: Build — grow your own brain</title>
+<meta name="description" content="Start with an empty brain. Answer questions, add your own categories, attach pictures and documents, and watch neurons grow.">
+<link rel="preconnect" href="https://api.fontshare.com">
+<link href="https://api.fontshare.com/v2/css?f[]=clash-display@500,600,700&f[]=satoshi@400,500,700&display=swap" rel="stylesheet">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ccircle cx='16' cy='16' r='6' fill='%23ff8a3d'/%3E%3C/svg%3E">
+<link rel="stylesheet" href="./style.css">
+<link rel="stylesheet" href="./build.css">
+</head>
+<body class="build">
+<div id="stage">
+  <canvas id="brain" aria-label="Your growing brain: categories, neurons and synapses" role="img"></canvas>
+
+  <header id="top">
+    <div class="brand">
+      <svg class="mark" viewBox="0 0 32 32" width="26" height="26" aria-hidden="true">
+        <circle cx="16" cy="16" r="4.2" fill="currentColor"/>
+        <g fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round">
+          <path d="M16 12V5M16 20v7M12 16H5M20 16h7M13 13l-5-5M19 19l5 5M19 13l5-5M13 19l-5 5"/>
+        </g>
+        <g fill="currentColor">
+          <circle cx="16" cy="4" r="1.6"/><circle cx="16" cy="28" r="1.6"/><circle cx="4" cy="16" r="1.6"/><circle cx="28" cy="16" r="1.6"/>
+          <circle cx="7" cy="7" r="1.3"/><circle cx="25" cy="25" r="1.3"/><circle cx="25" cy="7" r="1.3"/><circle cx="7" cy="25" r="1.3"/>
+        </g>
+      </svg>
+      <div class="brand-text">
+        <span class="title">MindBlown</span>
+        <span class="sub">Build · grow your own brain</span>
+      </div>
+      <nav class="brains" aria-label="Brains"><a href="index.html">Projects</a><a href="life.html">Life</a><a href="programming.html">Programming</a><a href="build.html" class="on">Build</a></nav>
+    </div>
+
+    <div class="search" role="search">
+      <input id="q" type="search" placeholder="Find a neuron, answer or file…" autocomplete="off" aria-label="Search your brain">
+      <ul id="results" class="results" role="listbox" hidden></ul>
+    </div>
+
+    <div class="actions" id="actions">
+      <button class="act" id="act-questions" title="Manage questions and interests">Questions</button>
+      <button class="act" id="act-explode" title="Open this brain in the full MindBlown explorer">Explode</button>
+      <button class="act" id="act-save" title="Download your brain as a file">Save</button>
+      <button class="act" id="act-open" title="Load a saved brain file">Open</button>
+      <input type="file" id="file-open" accept=".json,application/json" hidden>
+      <button class="act more" id="act-more" aria-label="More" aria-haspopup="menu">···</button>
+      <div class="menu" id="more-menu" hidden role="menu">
+        <button role="menuitem" id="m-rename">Change my name</button>
+        <button role="menuitem" id="m-export-data">Export as MindBlown dataset</button>
+        <button role="menuitem" id="m-reset" class="danger">Start over</button>
+      </div>
+    </div>
+  </header>
+
+  <!-- the interviewer -->
+  <aside id="interview" class="interview" aria-label="Interview">
+    <div class="iv-head">
+      <span class="iv-who"><span class="dot"></span>Computer</span>
+      <span class="iv-ctx" id="iv-ctx"></span>
+      <button class="iv-pause" id="iv-pause" title="Pause or resume the interview" aria-pressed="false">Pause</button>
+    </div>
+    <p class="iv-ack" id="iv-ack" aria-live="polite"></p>
+    <h2 class="iv-q" id="iv-q" aria-live="polite">…</h2>
+    <div class="iv-opts" id="iv-opts" hidden></div>
+    <div class="iv-files" id="iv-files" hidden>
+      <label class="drop" for="iv-file-input"><span>Drop pictures or documents here, or <u>browse</u></span></label>
+      <input type="file" id="iv-file-input" multiple hidden>
+      <div class="iv-file-list" id="iv-file-list"></div>
+    </div>
+    <div class="iv-input" id="iv-input">
+      <textarea id="iv-answer" rows="1" placeholder="Type your answer…" aria-label="Your answer"></textarea>
+      <button class="send" id="iv-send" aria-label="Answer">↵</button>
+    </div>
+    <div class="iv-tools">
+      <button id="iv-skip" title="Ask me later">Skip</button>
+      <button id="iv-never" title="Turn this question off">Not this one</button>
+      <button id="iv-more" title="Ask me more about this subject">More like this</button>
+      <span class="iv-count" id="iv-count"></span>
+    </div>
+    <div class="iv-interests" id="iv-interests" hidden>
+      <p class="iv-note">Pick what you want to be asked about most. You can change this any time under Questions, and add your own.</p>
+      <div class="chips" id="interest-chips"></div>
+      <form class="chip-add" id="interest-add"><input id="interest-new" placeholder="Add your own subject…" aria-label="Add a subject"><button type="submit">Add</button></form>
+      <button class="primary" id="interest-done">Start asking</button>
+    </div>
+    <div class="iv-empty" id="iv-empty" hidden>
+      <p>I am out of enabled questions for now. Star a neuron and I will ask about it, turn more questions on under Questions, or add your own.</p>
+      <div class="row"><button class="primary" id="iv-open-questions">Open Questions</button><button id="iv-new-cat">New category</button></div>
+    </div>
+  </aside>
+
+  <!-- categories -->
+  <aside id="cats" aria-label="Categories">
+    <div class="lobes-head" id="cats-head">Categories <span class="n" id="cats-n"></span></div>
+    <div id="cat-list"></div>
+    <button class="add-cat" id="add-cat">+ New category</button>
+    <div class="switches">
+      <label class="switch"><input type="checkbox" id="explode-all"><span>Show every synapse</span></label>
+    </div>
+  </aside>
+
+  <div id="level" class="level" aria-live="polite">
+    <span class="dot"></span><span id="level-text">Empty brain</span>
+    <span class="hint" id="hint">answer a question to grow a neuron</span>
+    <span class="store" id="store" title="Where your brain is stored"></span>
+  </div>
+
+  <div id="zoom-ctl" class="zoom-ctl" role="group" aria-label="Zoom">
+    <button id="z-in" aria-label="Zoom in">+</button>
+    <button id="z-out" aria-label="Zoom out">−</button>
+    <button id="z-fit" aria-label="Fit whole brain" title="Fit whole brain">⌂</button>
+  </div>
+
+  <div id="tip" class="tip" hidden></div>
+
+  <aside id="panel" class="panel" hidden aria-label="Details">
+    <button class="close" id="panel-close" aria-label="Close details">×</button>
+    <div id="panel-body"></div>
+  </aside>
+
+  <!-- questions & interests manager -->
+  <div class="modal" id="qmodal" hidden role="dialog" aria-modal="true" aria-labelledby="qmodal-title">
+    <div class="modal-card">
+      <button class="close" id="qmodal-close" aria-label="Close">×</button>
+      <h2 id="qmodal-title">Questions</h2>
+      <p class="modal-sub">Everything here is yours to change. Turn questions on or off, star the subjects you want asked about most, and add your own.</p>
+      <section class="mod-sec">
+        <h3>Interests <span>asked about more often</span></h3>
+        <div class="chips" id="modal-interests"></div>
+        <form class="chip-add" id="modal-interest-add"><input id="modal-interest-new" placeholder="Add a subject or category…" aria-label="Add an interest"><button type="submit">Add</button></form>
+      </section>
+      <section class="mod-sec">
+        <h3>Add a question</h3>
+        <form class="q-add" id="q-add">
+          <input id="qa-text" placeholder="What should Computer ask you?" required aria-label="Question text">
+          <div class="row">
+            <select id="qa-cat" aria-label="Category"></select>
+            <input id="qa-sub" placeholder="Neuron (optional)" aria-label="Neuron the answer lands on">
+            <select id="qa-type" aria-label="Answer type">
+              <option value="text">Short answer</option>
+              <option value="long">Long answer</option>
+              <option value="list">List · each item becomes a neuron</option>
+              <option value="date">Date</option>
+              <option value="files">Files</option>
+            </select>
+            <button type="submit" class="primary">Add</button>
+          </div>
+        </form>
+      </section>
+      <section class="mod-sec">
+        <h3>All questions <span id="q-summary"></span></h3>
+        <div class="q-filter"><input id="q-filter" placeholder="Filter questions…" aria-label="Filter questions"></div>
+        <div id="q-groups"></div>
+      </section>
+    </div>
+  </div>
+
+  <!-- generic in-page dialog (confirm / prompt) -->
+  <div class="modal small" id="dlg" hidden role="dialog" aria-modal="true">
+    <div class="modal-card">
+      <h2 id="dlg-title"></h2>
+      <p id="dlg-text"></p>
+      <input id="dlg-input" aria-label="Value" hidden>
+      <div class="row end"><button id="dlg-cancel">Cancel</button><button id="dlg-ok" class="primary">OK</button></div>
+    </div>
+  </div>
+
+  <!-- full MindBlown explorer, fed with the live brain -->
+  <div class="explorer" id="explorer" hidden>
+    <button class="explorer-close" id="explorer-close">← Back to Build</button>
+    <iframe id="explorer-frame" title="Your brain in the MindBlown explorer"></iframe>
+  </div>
+
+  <div id="loading" class="loading"><div class="pulse"></div><span>Preparing an empty brain…</span></div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/d3@7"></script>
+<script src="./build-questions.js"></script>
+<script src="./build.js"></script>
+</body>
+</html>

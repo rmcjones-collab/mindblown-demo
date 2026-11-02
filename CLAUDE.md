@@ -1,6 +1,6 @@
 # CLAUDE.md — MindBlown demo (public)
 
-MindBlown explodes a Perplexity Brain (knowledge wiki) into a zoomable D3 canvas: **lobes** → **neurons** → **sub-neurons** (one level deeper via `parent`) → **synapses** → **sources**. This repository is the **public, fictional** demo published at https://mindblown.pplx.app: two brains for an invented person, Sam Vale of Port Ellery (`index.html` + `data.js` for Projects, `life.html` + `life-data.js` for Life). Static site, no build step, no backend, no framework.
+MindBlown explodes a Perplexity Brain (knowledge wiki) into a zoomable D3 canvas: **lobes** → **neurons** → **sub-neurons** (one level deeper via `parent`) → **synapses** → **sources**. This repository is the **public, fictional** demo published at https://mindblown.pplx.app: two brains for an invented person, Sam Vale of Port Ellery (`index.html` + `data.js` for Projects, `life.html` + `life-data.js` for Life). Static site, no build step, no backend, no framework. A third page, `build.html` (+ `build.js`, `build.css`, `build-questions.js`), is the **Build** module: an interview that grows a brain from scratch in the browser (IndexedDB + Save/Open JSON). It has its own live-growing canvas renderer and does **not** use `app.js`, except that **Explode** loads `index.html` into an iframe (`srcdoc`) with the generated dataset injected in place of `data.js`. All user text is escaped before reaching `innerHTML`; files are stored as Blobs and never leave the browser.
 
 Read `HANDOFF-CLAUDE-CODE.md` next.
 
