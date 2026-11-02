@@ -1,5 +1,37 @@
 /* MindBlown — explode the Brain into lobes, neurons and synapses. */
 (() => {
+  // ---------- nav: one dropdown of every brain, in the header on every page ----------
+  // Source, in order: window.MINDBLOWN_NAV ([{label, href, color?, sep?}]), or an existing <nav class="brains"> of links; the current page is marked by href or .on
+  (() => {
+    const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+    let nav = document.querySelector('nav.brains');
+    const here = location.pathname.split('/').pop() || 'index.html';
+    let items = Array.isArray(window.MINDBLOWN_NAV) ? window.MINDBLOWN_NAV : null;
+    // links become items; a <select> of pages (as the genome's chromosome picker) unfolds into one item per option; anything else is a separator
+    const ofLink = el => ({ label: el.textContent.trim(), href: el.getAttribute('href'), color: (el.querySelector('.dot') || {}).style?.background || '', on: el.classList.contains('on') });
+    if (!items && nav) items = [...nav.children].flatMap(el => el.matches('a') ? [ofLink(el)] : el.matches('select') ? [{ sep: true }, ...[...el.options].filter(o => o.value).map(o => ({ label: o.textContent.trim(), href: o.value, on: o.selected && el.classList.contains('on') }))] : [{ sep: true }]);
+    if (items) items = items.filter((it, k, a) => !it.sep || (k > 0 && k < a.length - 1 && !a[k - 1].sep)); // no leading, trailing or doubled separators
+    if (!items || !items.filter(i => !i.sep).length) return;
+    if (!nav) { nav = document.createElement('nav'); nav.className = 'brains'; const bt = document.querySelector('.brand-text'); if (bt) bt.after(nav); else document.getElementById('top').prepend(nav); }
+    nav.classList.add('dd'); nav.setAttribute('aria-label', 'Brains');
+    const cur = items.find(i => !i.sep && (i.on || (i.href || '').split('/').pop().split('#')[0] === here)) || items.find(i => !i.sep);
+    const dot = c => c ? `<span class="dot" style="background:${esc(c)}"></span>` : '<span class="dot none"></span>';
+    nav.innerHTML = `<button class="nav-btn" aria-haspopup="menu" aria-expanded="false" title="Switch brain">${dot(cur.color)}<span class="cur">${esc(cur.label)}</span><span class="chev" aria-hidden="true">▾</span></button>
+      <ul class="nav-menu" role="menu" hidden>${items.map(i => i.sep ? '<li class="sep" role="separator"></li>' : `<li role="none"><a role="menuitem" href="${esc(i.href)}"${i === cur ? ' class="on" aria-current="page"' : ''}>${dot(i.color)}<span>${esc(i.label)}</span></a></li>`).join('')}</ul>`;
+    const btn = nav.querySelector('.nav-btn'), menu = nav.querySelector('.nav-menu');
+    const open = o => { menu.hidden = !o; btn.setAttribute('aria-expanded', String(o)); nav.classList.toggle('open', o); if (o) { nav.classList.remove('flip'); nav.classList.toggle('flip', menu.getBoundingClientRect().right > innerWidth - 8); menu.querySelector('a.on, a')?.focus(); } };
+    btn.addEventListener('click', () => open(menu.hidden));
+    document.addEventListener('click', e => { if (!nav.contains(e.target)) open(false); });
+    nav.addEventListener('keydown', e => {
+      const links = [...menu.querySelectorAll('a')], i = links.indexOf(document.activeElement);
+      if (e.key === 'Escape') { open(false); btn.focus(); }
+      else if (e.key === 'ArrowDown') { e.preventDefault(); if (menu.hidden) open(true); else links[(i + 1) % links.length]?.focus(); }
+      else if (e.key === 'ArrowUp') { e.preventDefault(); if (menu.hidden) { open(true); links[links.length - 1]?.focus(); } else links[(i - 1 + links.length) % links.length]?.focus(); }
+    });
+  })();
+  // pages without a canvas (an overview or index page) load app.js for the nav alone
+  if (!document.getElementById('brain') || !window.MINDBLOWN) return;
+
   const D = window.MINDBLOWN;
   // optional network layer: other brains that share neuron ids with this one (see build_network.py in a network repo)
   const N = window.MINDBLOWN_NETWORK || null;
@@ -99,6 +131,8 @@
   let depthF = 0, depthTarget = 0;       // 0 sub-neurons folded into parents → 1 unfolded
   let forceExplode = false, showCocite = false;
   let hover = null, selected = null, pulseSyn = null;
+  let labelsOn = true, labelF = 1;        // labels toggle (L); when off, only the hovered neuron or lobe keeps its label
+  let mouseW = null;                      // cursor in world units, for lobe hover while labels are off
   // tools: 'select' = left-drag draws a marquee and moves neurons; 'pan' = left-drag pans (the classic behaviour)
   let mode = 'select', spaceDown = false;
   const multi = new Set();              // marquee-selected neurons; dragging one moves them all
@@ -276,6 +310,9 @@
       refreshForces(); if (sim.alpha() < 0.2) sim.alpha(0.3).restart();
     } else if (depthF !== depthTarget) { depthF = depthTarget; refreshForces(); }
 
+    const wantL = labelsOn ? 1 : 0;
+    if (Math.abs(labelF - wantL) > 0.004) labelF += (wantL - labelF) * 0.18; else labelF = wantL;
+
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.clearRect(0, 0, W, H);
     ctx.translate(tx, ty); ctx.scale(k, k);
@@ -293,6 +330,7 @@
     const nodeR = n => n.kind === 'page' ? n.r / Math.pow(k, 0.45) * (isChild(n) ? 0.35 + 0.65 * depthF : 1) : n.kind === 'syn' ? sw(3.2) : sw(2.4);
     const depthA = n => n.kind === 'page' ? (isChild(n) ? depthF : 1) : n.kind === 'syn' ? (isChild(pageById[n.page]) ? depthF : 1) : 1;
     const childLabelVis = clamp01((k - 1.05) / 0.4) * depthF;
+    const labelOf = n => n === hover ? 1 : labelF;   // the hovered node keeps its label while labels are toggled off
 
     // viewport culling bounds (world)
     const [vx0, vy0] = toWorld(-80, -80), [vx1, vy1] = toWorld(W + 80, H + 80);
@@ -347,10 +385,12 @@
           const pen = penalty(box, c); if (pen < bestPen) { bestPen = pen; best = box; }
         }
         placed.push(best);
+        const tl = Math.max(labelF, mouseW && Math.hypot(mouseW[0] - cx, mouseW[1] - cy) < rr ? 1 : 0);   // hovered lobe keeps its title
+        if (tl < 0.02) return;
         ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
         ctx.textAlign = best.align; ctx.textBaseline = 'top';
-        ctx.font = `600 ${fs}px 'Clash Display', 'Satoshi', sans-serif`; ctx.fillStyle = rgba(l.color, 0.85 * lobeVis); ctx.fillText(l.name, best.sx, best.y + 2);
-        ctx.font = `500 ${fs2}px 'Satoshi', sans-serif`; ctx.fillStyle = rgba('#a7b2cc', 0.8 * lobeVis); ctx.fillText(line2, best.sx, best.y + fs + 8);
+        ctx.font = `600 ${fs}px 'Clash Display', 'Satoshi', sans-serif`; ctx.fillStyle = rgba(l.color, 0.85 * lobeVis * tl); ctx.fillText(l.name, best.sx, best.y + 2);
+        ctx.font = `500 ${fs2}px 'Satoshi', sans-serif`; ctx.fillStyle = rgba('#a7b2cc', 0.8 * lobeVis * tl); ctx.fillText(line2, best.sx, best.y + fs + 8);
         ctx.setTransform(dpr, 0, 0, dpr, 0, 0); ctx.translate(tx, ty); ctx.scale(k, k);
         ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic';
       });
@@ -434,9 +474,9 @@
         const r = nodeR(n) * (0.6 + 0.4 * explodeF);
         ctx.fillStyle = rgba(n.kindOf === 'github' ? '#c7d2ea' : '#dbe4ff', (related ? 0.9 : 0.15) * v);
         ctx.beginPath(); ctx.moveTo(n.x, n.y - r * 1.4); ctx.lineTo(n.x + r, n.y); ctx.lineTo(n.x, n.y + r * 1.4); ctx.lineTo(n.x - r, n.y); ctx.closePath(); ctx.fill();
-        if (srcLabelVis > 0 && related) {
+        if (srcLabelVis * labelOf(n) > 0.02 && related) {
           ctx.font = `500 ${sw(10)}px 'Satoshi', sans-serif`; ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
-          ctx.fillStyle = rgba('#a7b2cc', 0.9 * srcLabelVis * v);
+          ctx.fillStyle = rgba('#a7b2cc', 0.9 * srcLabelVis * v * labelOf(n));
           ctx.fillText(n.label, n.x + r + sw(4), n.y);
         }
       });
@@ -456,7 +496,7 @@
         ctx.beginPath(); ctx.arc(n.x, n.y, r * (isPulse ? 1.9 : 1), 0, Math.PI * 2); ctx.fill();
         if (related && n.links.length) { ctx.strokeStyle = rgba('#ffffff', 0.7 * v); ctx.lineWidth = sw(0.8); ctx.beginPath(); ctx.arc(n.x, n.y, r + sw(1.6), 0, Math.PI * 2); ctx.stroke(); }
         if (isPulse) { ctx.strokeStyle = rgba('#ffffff', 0.9); ctx.lineWidth = sw(1.5); ctx.beginPath(); ctx.arc(n.x, n.y, r + sw(5), 0, Math.PI * 2); ctx.stroke(); }
-        const lv = focusSet && related ? Math.max(synLabelVisFocus, synLabelVisAll) : synLabelVisAll;
+        const lv = (focusSet && related ? Math.max(synLabelVisFocus, synLabelVisAll) : synLabelVisAll) * labelOf(n);
         if (lv > 0.02 && related) {
           const p = pageById[n.page];
           let ang = Math.atan2(n.y - p.y, n.x - p.x);
@@ -506,7 +546,7 @@
       if (n.pinned) { ctx.strokeStyle = rgba('#ffffff', 0.22 * a); ctx.lineWidth = sw(0.8); ctx.beginPath(); ctx.arc(n.x, n.y, r + sw(12), 0, Math.PI * 2); ctx.stroke(); }
       // label
       const important = isSelf(n) || n.deg >= 18 || n.r > 12.5;
-      const lv = isChild(n) ? childLabelVis : isSelf(n) ? 1 : important ? Math.max(labelVis, clamp01((k - 0.45) / 0.25)) : labelVis;
+      const lv = (isChild(n) ? childLabelVis : isSelf(n) ? 1 : important ? Math.max(labelVis, clamp01((k - 0.45) / 0.25)) : labelVis) * labelOf(n);
       if (lv > 0.02 && (related || lv > 0.6)) {
         const fs = isSelf(n) ? 15 : isChild(n) ? 10.5 : 12;
         ctx.font = `${isSelf(n) ? 600 : 500} ${sw(fs)}px 'Satoshi', sans-serif`; ctx.textAlign = 'center'; ctx.textBaseline = 'top';
@@ -621,6 +661,7 @@
     }
     if (marquee) { marquee.x1 = e.clientX; marquee.y1 = e.clientY; return; }
     if (downAt) return;
+    mouseW = toWorld(e.clientX, e.clientY);
     const n = pick(e.clientX, e.clientY);
     if (n !== hover) {
       hover = n; canvas.classList.toggle('pointer', !!n);
@@ -629,7 +670,7 @@
     }
     if (n) { tip.style.left = Math.min(e.clientX, W - 300) + 'px'; tip.style.top = Math.min(e.clientY, H - 90) + 'px'; }
   });
-  canvas.addEventListener('pointerleave', () => { hover = null; tip.hidden = true; });
+  canvas.addEventListener('pointerleave', () => { hover = null; mouseW = null; tip.hidden = true; });
   function tipHtml(n) {
     if (n.kind === 'page') return `<span class="k">${isChild(n) ? `sub-neuron of ${esc(n.parent.title)}` : typeName(n) + ' · ' + esc(lobeById[n.lobe].name)}</span><b>${esc(n.title)}</b>${n.nSyn} synapses · ${n.neighbors.length} connections${n.children.length ? ` · ${n.children.length} sub-neurons` : ''}`;
     if (n.kind === 'syn') return `<span class="k">synapse of ${esc(pageById[n.page].title)}</span><b>${esc(n.lead)}</b>${esc(n.text.slice(0, 140))}${n.text.length > 140 ? '…' : ''}`;
@@ -649,6 +690,7 @@
     else if (e.key === 'v' || e.key === 'V') setMode('select');
     else if (e.key === 'h' || e.key === 'H') setMode('pan');
     else if (e.key === 'r' || e.key === 'R') releaseAll();
+    else if (e.key === 'l' || e.key === 'L') setLabels(!labelsOn);
   });
 
   function select(n, opts = {}) {
@@ -766,10 +808,48 @@
   const tools = document.createElement('div'); tools.id = 'tools'; tools.className = 'zoom-ctl tools'; tools.setAttribute('role', 'group'); tools.setAttribute('aria-label', 'Tools');
   tools.innerHTML = `<button class="tool-mode on" data-mode="select" title="Select & move (V): drag a box to select neurons, drag neurons to move them; mouse3 or Space pans" aria-label="Select and move tool">⬚</button>
     <button class="tool-mode" data-mode="pan" title="Pan (H): drag to pan the view" aria-label="Pan tool">✋</button>
-    <button id="release-pins" title="Release hand-placed neurons (R)" aria-label="Release hand-placed neurons">⟲</button>`;
+    <button id="release-pins" title="Release hand-placed neurons (R)" aria-label="Release hand-placed neurons">⟲</button>
+    <button id="labels-toggle" title="Labels on/off (L): when off, only the neuron or lobe under the cursor keeps its label" aria-label="Toggle labels" aria-pressed="true"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 12V5a2 2 0 0 1 2-2h7l9 9-9 9-9-9z"/><circle cx="7.5" cy="7.5" r="1.2" fill="currentColor" stroke="none"/></svg></button>
+    <button id="shot" title="Screenshot (S): save the current view as a PNG" aria-label="Save a screenshot"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 8h3l2-3h6l2 3h3a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V9a1 1 0 0 1 1-1z"/><circle cx="12" cy="13.5" r="3.5"/></svg></button>`;
   document.getElementById('zoom-ctl').before(tools);
   tools.querySelectorAll('.tool-mode').forEach(b => b.addEventListener('click', () => setMode(b.dataset.mode)));
   document.getElementById('release-pins').addEventListener('click', releaseAll);
+  // labels toggle: a tool button and a switch in the lobes panel drive the same state
+  const switches = document.querySelector('#lobes .switches');
+  if (switches) { const l = document.createElement('label'); l.className = 'switch'; l.innerHTML = '<input type="checkbox" id="labels" checked><span>Labels</span>'; switches.prepend(l); }
+  function setLabels(on) {
+    labelsOn = on;
+    const b = document.getElementById('labels-toggle'); b.classList.toggle('off', !on); b.setAttribute('aria-pressed', String(on));
+    const c = document.getElementById('labels'); if (c) c.checked = on;
+    flash(on ? 'labels on' : 'labels off · hover a neuron or lobe to read it');
+  }
+  document.getElementById('labels-toggle').addEventListener('click', () => setLabels(!labelsOn));
+  document.getElementById('labels')?.addEventListener('change', e => setLabels(e.target.checked));
+  // screenshot: the canvas on the page background, with a small caption; saved as PNG
+  function screenshot() {
+    const out = document.createElement('canvas'); out.width = canvas.width; out.height = canvas.height;
+    const o = out.getContext('2d');
+    const g = o.createRadialGradient(out.width / 2, out.height * 0.45, 0, out.width / 2, out.height * 0.45, Math.max(out.width, out.height) * 0.7);
+    g.addColorStop(0, '#0e1322'); g.addColorStop(1, '#06080f'); o.fillStyle = g; o.fillRect(0, 0, out.width, out.height);
+    o.drawImage(canvas, 0, 0);
+    const title = (document.querySelector('.brand .title') || {}).textContent || 'MindBlown';
+    o.setTransform(dpr, 0, 0, dpr, 0, 0); o.textBaseline = 'alphabetic'; o.textAlign = 'left';
+    o.font = `500 ${12}px 'Satoshi', sans-serif`; o.fillStyle = 'rgba(167,178,204,0.85)';
+    o.fillText(`${title} · ${levelText.textContent} · ${new Date().toISOString().slice(0, 10)}`, 16, H - 14);
+    const stamp = new Date().toISOString().slice(0, 16).replace(/[-:T]/g, '').replace(/^(\d{8})(\d{4})$/, '$1-$2');
+    const name = `${title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')}-${stamp}.png`;
+    out.toBlob(blob => {
+      if (!blob) { flash('screenshot failed'); return; }
+      const url = URL.createObjectURL(blob), a = document.createElement('a'); a.href = url; a.download = name; document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 4000); flash(`saved ${name}`);
+    }, 'image/png');
+  }
+  document.getElementById('shot').addEventListener('click', screenshot);
+  window.addEventListener('keydown', e => { if ((e.key === 's' || e.key === 'S') && !e.target.closest('input') && !e.metaKey && !e.ctrlKey) screenshot(); });
+  // a short message in the level pill's hint slot
+  let flashT = 0;
+  function flash(msg) { hint.textContent = msg; clearTimeout(flashT); flashT = setTimeout(() => updateHint(), 2200); }
+
   canvas.classList.add('select');
   const levelText = document.getElementById('level-text'), levelDot = document.querySelector('#level .dot'), hint = document.getElementById('hint');
   function updateLevel() {
@@ -841,5 +921,5 @@
   setTimeout(openHash, 1700);
   window.addEventListener('hashchange', openHash);
   // read-only hooks for the QA scripts in tools/ (screen position of a neuron, current marquee selection)
-  window.MINDBLOWN_QA = { screenOf: id => { const n = pageById[id]; return n ? toScreen(n.x, n.y) : null; }, selection: () => [...multi].map(n => n.id), pinned: () => pages.filter(n => n.pinned).map(n => n.id), mode: () => mode };
+  window.MINDBLOWN_QA = { screenOf: id => { const n = pageById[id]; return n ? toScreen(n.x, n.y) : null; }, selection: () => [...multi].map(n => n.id), pinned: () => pages.filter(n => n.pinned).map(n => n.id), mode: () => mode, labels: () => labelsOn, screenshot };
 })();
