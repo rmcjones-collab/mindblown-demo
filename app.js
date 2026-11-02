@@ -19,8 +19,10 @@
     pageById[p.id] = n; return n;
   });
   // one level deeper: a page may name a parent neuron; it then orbits that neuron as a sub-neuron
-  pages.forEach(n => { if (n.parentId && pageById[n.parentId] && pageById[n.parentId] !== n) { n.parent = pageById[n.parentId]; n.parent.children.push(n); } });
+  // only one level is allowed: a parent must itself be top-level, so chains and cycles collapse to a single hop
+  pages.forEach(n => { const p = n.parentId && pageById[n.parentId]; if (p && p !== n && !p.parentId) { n.parent = p; p.children.push(n); } });
   const isChild = n => n.kind === 'page' && !!n.parent;
+  const hasSubs = pages.some(isChild);
   const synById = {};
   const syns = D.synapses.map((s, i) => {
     const n = { ...s, kind: 'syn', idx: i, lobe: pageById[s.page].lobe, ordinal: pageById[s.page].synNodes.length };
@@ -71,7 +73,9 @@
   let W = 0, H = 0, dpr = 1;
   let activeNodes = [], activeLinks = [];
 
-  const visible = n => n.kind === 'page' ? lobeOn[n.lobe] : n.kind === 'syn' ? lobeOn[n.lobe] : n.pageNodes.some(p => lobeOn[p.lobe]);
+  // a sub-neuron is shown only while both its own lobe and its parent's lobe are on
+  const pageOn = p => lobeOn[p.lobe] && (!p.parent || lobeOn[p.parent.lobe]);
+  const visible = n => n.kind === 'page' ? pageOn(n) : n.kind === 'syn' ? pageOn(pageById[n.page]) : n.pageNodes.some(pageOn);
 
   // ---------- simulation ----------
   const linkDist = l => {
@@ -149,7 +153,8 @@
     sim.alpha(warm ? 0.25 : 0.5).restart();
     updateStats();
   }
-  function refreshForces() { sim.force('link').distance(linkDist); sim.force('collide').radius(collideR); sim.force('pageCollide').radius(pageCollideR); }
+  // D3 caches per-node strengths/radii when an accessor is set, so re-set them whenever explodeF/depthF move
+  function refreshForces() { sim.force('link').distance(linkDist); sim.force('charge').strength(charge); sim.force('collide').radius(collideR); sim.force('pageCollide').radius(pageCollideR); }
 
   // ---------- canvas ----------
   function resize() {
@@ -210,7 +215,7 @@
       explodeF += (explodeTarget - explodeF) * 0.12;
       refreshForces(); if (sim.alpha() < 0.2) sim.alpha(0.35).restart();
     } else if (explodeF !== explodeTarget) { explodeF = explodeTarget; refreshForces(); }
-    const wantD = forceExplode || k >= 0.85 ? 1 : 0;
+    const wantD = hasSubs && (forceExplode || k >= 0.85) ? 1 : 0;
     if (wantD !== depthTarget) depthTarget = wantD;
     if (Math.abs(depthF - depthTarget) > 0.004) {
       depthF += (depthTarget - depthF) * 0.1;
@@ -325,13 +330,14 @@
 
     // pulses
     if (!reduceMotion) {
-      if (now - lastPulse > 260) { lastPulse = now; const cand = activeLinks.filter(l => l.kind === 'pp'); spawnPulse(cand[Math.floor(Math.random() * cand.length)]); }
+      if (now - lastPulse > 260) { lastPulse = now; const cand = activeLinks.filter(l => l.kind === 'pp' && depthA(l.source) > 0.97 && depthA(l.target) > 0.97); spawnPulse(cand[Math.floor(Math.random() * cand.length)]); }
       for (let i = pulses.length - 1; i >= 0; i--) {
         const p = pulses[i]; p.t += p.speed; if (p.t >= 1) { pulses.splice(i, 1); continue; }
         const s = p.dir > 0 ? p.l.source : p.l.target, e = p.dir > 0 ? p.l.target : p.l.source;
         const x = s.x + (e.x - s.x) * p.t, y = s.y + (e.y - s.y) * p.t;
         const col = s.lobe === e.lobe ? lobeColor(s) : '#ffffff';
-        const a = Math.sin(p.t * Math.PI);
+        const a = Math.sin(p.t * Math.PI) * Math.min(depthA(s), depthA(e));
+        if (a < 0.02) continue;
         ctx.fillStyle = rgba(col, 0.9 * a * (focusSet ? 0.5 : 1)); ctx.beginPath(); ctx.arc(x, y, sw(2.2), 0, Math.PI * 2); ctx.fill();
         ctx.fillStyle = rgba(col, 0.25 * a); ctx.beginPath(); ctx.arc(x, y, sw(6), 0, Math.PI * 2); ctx.fill();
       }
@@ -475,12 +481,12 @@
   });
   canvas.addEventListener('pointerleave', () => { hover = null; tip.hidden = true; });
   function tipHtml(n) {
-    if (n.kind === 'page') return `<span class="k">${isChild(n) ? `sub-neuron of ${esc(n.parent.title)}` : typeName(n) + ' · ' + lobeById[n.lobe].name}</span><b>${esc(n.title)}</b>${n.nSyn} synapses · ${n.neighbors.length} connections${n.children.length ? ` · ${n.children.length} sub-neurons` : ''}`;
+    if (n.kind === 'page') return `<span class="k">${isChild(n) ? `sub-neuron of ${esc(n.parent.title)}` : typeName(n) + ' · ' + esc(lobeById[n.lobe].name)}</span><b>${esc(n.title)}</b>${n.nSyn} synapses · ${n.neighbors.length} connections${n.children.length ? ` · ${n.children.length} sub-neurons` : ''}`;
     if (n.kind === 'syn') return `<span class="k">synapse of ${esc(pageById[n.page].title)}</span><b>${esc(n.lead)}</b>${esc(n.text.slice(0, 140))}${n.text.length > 140 ? '…' : ''}`;
     return `<span class="k">${srcKind(n)}</span><b>${esc(n.label)}</b>cited by ${n.pageNodes.length} neuron${n.pageNodes.length > 1 ? 's' : ''}`;
   }
-  const srcKind = n => ({ session: 'Perplexity session', github: 'GitHub', web: 'Web source', gmail: 'Gmail (metadata)', calendar: 'Google Calendar', spotify: 'Spotify', plaid: 'Bank data (names only)', memory: 'Memory note', wiki: 'Brain page' }[n.kindOf] || 'Source');
-  const typeName = n => ({ project: 'project', entity: 'person / thing', person: 'person', place: 'place', habit: 'habit', event: 'event', account: 'account', trip: 'trip', preference: 'preference', day: D.dayName || 'dream log', audit: 'audit' }[n.type] || n.type);
+  const srcKind = n => ({ session: 'Perplexity session', github: D.demo ? 'Code host (demo)' : 'GitHub', web: 'Web source', gmail: 'Gmail (metadata)', calendar: 'Google Calendar', spotify: 'Spotify', plaid: 'Bank data (names only)', memory: 'Memory note', wiki: 'Brain page' }[n.kindOf] || 'Source');
+  const typeName = n => esc({ project: 'project', entity: 'person / thing', person: 'person', place: 'place', habit: 'habit', event: 'event', account: 'account', trip: 'trip', preference: 'preference', day: D.dayName || 'dream log', audit: 'audit' }[n.type] || n.type || '');
   const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 
   const panel = document.getElementById('panel'), panelBody = document.getElementById('panel-body');
@@ -490,10 +496,14 @@
   function select(n, opts = {}) {
     if (selected && selected.kind === 'page') { selected.fx = null; selected.fy = null; }
     selected = n; pulseSyn = null;
-    if (n.kind === 'page') { n.fx = n.x; n.fy = n.y; }
+    if (n.kind === 'page' && !isChild(n)) { n.fx = n.x; n.fy = n.y; }   // sub-neurons stay free so they can reach their ring slot
     if (n.kind === 'page') {
       const kk = isChild(n) ? 3.6 : n.nSyn > 14 ? 2.6 : 3.2;
-      if (!opts.noZoom) zoomTo(n, Math.max(k, kk));
+      if (!opts.noZoom) {
+        const folded = isChild(n) && depthF < 0.97;
+        zoomTo(folded ? n.parent : n, Math.max(k, kk));          // a folded sub-neuron has no ring slot yet, so head for its parent first
+        if (folded) setTimeout(() => { if (selected === n) zoomTo(n, Math.max(k, kk), 700); }, 900);   // then settle on the child once it has unfolded
+      }
       n.neighbors.forEach(x => spawnPulse(x.l, true));
     } else if (n.kind === 'syn') { pulseSyn = n; if (!opts.noZoom) zoomTo(n, Math.max(k, 3.4)); }
     else if (!opts.noZoom) zoomTo(n, Math.max(k, 3));
@@ -505,7 +515,7 @@
     const col = lobeColor(n);
     let h = '';
     if (n.kind === 'page') {
-      h += `<div class="kind"><span class="sw" style="background:${col};color:${col}"></span>${typeName(n)} · ${lobeById[n.lobe].name}</div>`;
+      h += `<div class="kind"><span class="sw" style="background:${col};color:${col}"></span>${typeName(n)} · ${esc(lobeById[n.lobe].name)}</div>`;
       h += `<h2>${esc(n.title)}</h2><p class="desc">${esc(n.desc || n.intro)}</p>`;
       h += `<div class="meta">${n.updated ? `<span>updated ${n.updated}</span>` : ''}<span>${n.nSyn} synapses</span><span>${n.neighbors.length} connections</span><span>${n.srcNodes.length} sources</span></div>`;
       if (n.parent) h += `<h3>Part of</h3><ul><li class="nb" data-id="${esc(n.parent.id)}"><span class="sw" style="background:${lobeColor(n.parent)}"></span><span class="t">${esc(n.parent.title)}<span class="note">parent neuron</span></span></li></ul>`;
@@ -554,7 +564,7 @@
     }));
     panel.scrollTop = 0;
   }
-  const srcKindShort = s => ({ session: 'session', github: 'github', web: 'web', gmail: 'gmail', calendar: 'calendar', spotify: 'spotify', plaid: 'bank', memory: 'memory', wiki: 'brain' }[s.kindOf] || 'source');
+  const srcKindShort = s => ({ session: 'session', github: D.demo ? 'code' : 'github', web: 'web', gmail: 'gmail', calendar: 'calendar', spotify: 'spotify', plaid: 'bank', memory: 'memory', wiki: 'brain' }[s.kindOf] || 'source');
   function ensureLobe(id) { if (!lobeOn[id]) { lobeOn[id] = true; renderLobeList(); rebuild(false); } }
 
   // ---------- lobe list ----------
@@ -564,7 +574,7 @@
   function renderLobeList() {
     lobeList.innerHTML = lobes.map(l => {
       const ps = pages.filter(p => p.lobe === l.id && !isChild(p));
-      return `<button class="lobe ${lobeOn[l.id] ? '' : 'off'}" data-id="${l.id}" aria-pressed="${lobeOn[l.id]}" style="color:${lobeOn[l.id] ? 'var(--text)' : ''}"><span class="sw" style="background:${l.color};color:${l.color}"></span><span>${l.name}</span><span class="n">${ps.length}</span></button>`;
+      return `<button class="lobe ${lobeOn[l.id] ? '' : 'off'}" data-id="${l.id}" aria-pressed="${lobeOn[l.id]}" style="color:${lobeOn[l.id] ? 'var(--text)' : ''}"><span class="sw" style="background:${l.color};color:${l.color}"></span><span>${esc(l.name)}</span><span class="n">${ps.length}</span></button>`;
     }).join('');
     lobeList.querySelectorAll('.lobe').forEach(b => b.addEventListener('click', () => {
       const id = b.dataset.id; lobeOn[id] = !lobeOn[id];
@@ -581,11 +591,11 @@
   document.getElementById('z-fit').addEventListener('click', () => { clearSelection(); fitAll(); });
   const levelText = document.getElementById('level-text'), levelDot = document.querySelector('#level .dot'), hint = document.getElementById('hint');
   function updateLevel() {
-    const lvl = forceExplode || k >= 1.5 ? 'Synapses' : k >= 0.85 ? 'Sub-neurons' : k >= 0.6 ? 'Neurons' : 'Lobes';
+    const lvl = forceExplode || k >= 1.5 ? 'Synapses' : hasSubs && k >= 0.85 ? 'Sub-neurons' : k >= 0.6 ? 'Neurons' : 'Lobes';
     levelText.textContent = lvl + ` · ${k.toFixed(1)}×`;
     const c = lvl === 'Synapses' ? '#ffffff' : lvl === 'Sub-neurons' ? '#fbbf24' : lvl === 'Neurons' ? '#ff8a3d' : '#4fd1c5';
     levelDot.style.background = c; levelDot.style.boxShadow = `0 0 12px ${c}`;
-    hint.textContent = lvl === 'Lobes' ? 'scroll to zoom · drag to pan · click a neuron' : lvl === 'Neurons' ? 'keep zooming: sub-neurons unfold at 0.85×, synapses at 1.5×' : lvl === 'Sub-neurons' ? 'small satellites are sub-neurons · zoom past 1.5× to explode synapses' : 'dots are synapses · diamonds are sources · dashed lines fire across neurons';
+    hint.textContent = lvl === 'Lobes' ? 'scroll to zoom · drag to pan · click a neuron' : lvl === 'Neurons' ? (hasSubs ? 'keep zooming: sub-neurons unfold at 0.85×, synapses at 1.5×' : 'keep zooming: synapses explode at 1.5×') : lvl === 'Sub-neurons' ? 'small satellites are sub-neurons · zoom past 1.5× to explode synapses' : 'dots are synapses · diamonds are sources · dashed lines fire across neurons';
   }
   function updateStats() {
     const vp = pages.filter(visible);
@@ -606,7 +616,7 @@
     hits.sort((a, b) => a.score - b.score);
     resultItems = hits.slice(0, 9).map(h => h.n);
     results.innerHTML = resultItems.length ? resultItems.map(n => n.kind === 'page'
-      ? `<li role="option"><span class="sw" style="background:${lobeColor(n)}"></span><span><span class="rt">${esc(n.title)}</span><span class="rs">${isChild(n) ? 'sub-neuron of ' + esc(n.parent.title) : typeName(n) + ' · ' + lobeById[n.lobe].name} · ${n.nSyn} synapses</span></span></li>`
+      ? `<li role="option"><span class="sw" style="background:${lobeColor(n)}"></span><span><span class="rt">${esc(n.title)}</span><span class="rs">${isChild(n) ? 'sub-neuron of ' + esc(n.parent.title) : typeName(n) + ' · ' + esc(lobeById[n.lobe].name)} · ${n.nSyn} synapses</span></span></li>`
       : `<li role="option"><span class="sw" style="background:${lobeColor(n)};opacity:.6"></span><span><span class="rt">${esc(n.lead)}</span><span class="rs">synapse of ${esc(pageById[n.page].title)}</span></span></li>`).join('')
       : `<li><span class="empty">Nothing fires for “${esc(q.value)}”</span></li>`;
     results.hidden = false; activeIdx = -1;

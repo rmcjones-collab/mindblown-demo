@@ -86,7 +86,7 @@ page(SAM, 'Sam Vale', 'person', 'self',
       ('Lives in Port Ellery', 'A narrow house two streets up from the harbour in the Saltmarsh Lane neighbourhood; the first search in the trail was literally "tide times Port Ellery".', [M_HOUSE, SES('tide times Port Ellery', '2026-09-14')], ['home/saltmarsh-house', 'home/saltmarsh-lane']),
       ('Parent of Juno', 'Sam\'s daughter Juno is nine, born March 3, in Year 4 at Ellery Point Primary; her school, dentist, swim squad and playlist all thread through this brain.', [M_KID, CAL("Juno's birthday", '2027-03-03')], ['people/juno']),
       ('Born August 21', 'Two calendar entries mark it: "Sam\'s birthday" and a "Cake at the club" event created by Priya Natarajan.', [CAL("Sam's birthday", '2026-08-21'), CAL('Cake at the club', '2026-08-21')], ['people/priya-natarajan']),
-      ('Handles online', 'The footprint review tied sam.vale@example.test to the handles saltyvale, ValeStudio and nikau27, a GitHub account sam-vale and an old race-results listing.', [FOOT, W_FOOT], ['home/footprint', 'studio/vale-studio']),
+      ('Handles online', 'The footprint review tied sam.vale@example.test to the handles saltyvale, ValeStudio and nikau27, a code-hosting account at git.example.test/sam-vale and an old race-results listing.', [FOOT, W_FOOT], ['home/footprint', 'studio/vale-studio']),
       ('Builder as well as installer', 'Six public-ish repositories in two months: a tide planner, a cosy forest game, a meal planner, a children\'s-book site and a ledger.', [GH('tidewatch'), GH('hollow-pines'), GH('ledgerline')], ['studio/repos']),
       ('Co-parenting on a schedule', 'Juno alternates weeks between Sam and Dana Okafor under an agreement finalised in 2025; the calendar carries the rules.', [CAL('Week swap – Juno to Dana', '2026-11-08'), WIKI('projects/coparenting-agreement', 'Co-parenting agreement')], ['family/coparenting-schedule']),
       ('Asked for a whole-life operating system', 'On September 14 Sam asked for help getting money, Juno, the boat and the studio into one plan; that became the Vale life dashboard and, eventually, this map.', [LIFE, W_LIFE], ['money/overview', 'body/fitness']),
@@ -602,7 +602,7 @@ sources = [{'id': u, 'label': m['label'], 'kind': m['kind'], 'pages': pages_by_s
 data = {'lobes': [{'id': l['id'], 'name': l['name'], 'color': l['color'], 'hidden': l.get('hidden', False)} for l in LOBES], 'center': SAM,
         'demo': True, 'title': 'MindBlown: Life', 'subtitle': 'demo life brain · fictional data', 'dayName': 'search day',
         'pages': PAGES, 'synapses': synapses, 'sources': sources, 'links': list(links.values()), 'synLinks': synLinks, 'cocite': cocite, 'built': TODAY}
-with open(OUT, 'w') as f: f.write('window.MINDBLOWN = ' + json.dumps(data, ensure_ascii=False) + ';\n')
+with open(OUT, 'w', encoding='utf-8') as f: f.write('window.MINDBLOWN = ' + json.dumps(data, ensure_ascii=False) + ';\n')
 kinds = collections.Counter(s['kind'] for s in sources)
 subs = sum(1 for p in PAGES if p.get('parent'))
 print(f'pages={len(PAGES)} (sub-neurons={subs}) synapses={len(synapses)} sources={len(sources)} links={len(links)} cocite={len(cocite)}', dict(kinds))
