@@ -537,7 +537,7 @@
     const base = emptyBrain();
     const arr = v => Array.isArray(v) ? v.filter(x => x && typeof x === 'object') : [];
     b.name = str(b.name, 80); b.created = safeDate(b.created); b.updated = safeDate(b.updated);
-    b.cats = arr(b.cats).map(c => ({ id: str(c.id, 60), name: str(c.name, 80) || 'Category', color: safeColor(c.color), enabled: c.enabled !== false, custom: !!c.custom, desc: str(c.desc, 400), icon: str(c.icon, 8) }));
+    b.cats = !Array.isArray(b.cats) ? base.cats : arr(b.cats).map(c => ({ id: str(c.id, 60), name: str(c.name, 80) || 'Category', color: safeColor(c.color), enabled: c.enabled !== false, custom: !!c.custom, desc: str(c.desc, 400), icon: str(c.icon, 8) }));
     if (!b.cats.some(c => c.id === 'you')) b.cats.unshift(base.cats[0]);
     b.subjects = arr(b.subjects).map(s => ({ id: str(s.id, 60), cat: str(s.cat, 60), name: str(s.name, 120) || 'Neuron', starred: !!s.starred, desc: str(s.desc, 600), created: safeDate(s.created) }));
     if (!b.subjects.some(s => s.id === 'me')) b.subjects.unshift({ ...base.subjects[0], name: b.name || 'Me' });
@@ -547,8 +547,12 @@
     b.followups = arr(b.followups).map(f => ({ id: str(f.id, 60), cat: str(f.cat, 60), sub: f.sub == null ? null : str(f.sub, 120), subId: f.subId == null ? null : str(f.subId, 60), type: str(f.type, 20) || 'long', text: str(f.text, 500), parent: str(f.parent, 120) }));
     b.interests = Array.isArray(b.interests) ? b.interests.map(i => str(i, 70)) : [];
     b.disabled = Array.isArray(b.disabled) ? b.disabled.map(i => str(i, 120)) : [];
-    b.answered = b.answered && typeof b.answered === 'object' ? b.answered : {}; b.skipped = b.skipped && typeof b.skipped === 'object' ? b.skipped : {};
-    b.history = Array.isArray(b.history) ? b.history.slice(-200) : []; b.paused = !!b.paused; b.interestsChosen = !!b.interestsChosen;
+    const plain = v => v && typeof v === 'object' && !Array.isArray(v) ? v : {};
+    b.answered = Object.fromEntries(Object.entries(plain(b.answered)).map(([k, v]) => [str(k, 120), Array.isArray(v) ? v.map(x => str(x, 60)) : []]));
+    b.skipped = Object.fromEntries(Object.entries(plain(b.skipped)).filter(([, v]) => Number.isFinite(v)).map(([k, v]) => [str(k, 120), v]));
+    b.history = arr(b.history).slice(-200).map(h => ({ at: str(h.at, 40), q: str(h.q, 500), a: str(h.a, 20000), cat: str(h.cat, 60), entries: Array.isArray(h.entries) ? h.entries.map(x => str(x, 60)) : [], followup: !!h.followup }));
+    b.asks = Number.isFinite(b.asks) ? b.asks : 0; b.lastCat = b.lastCat == null ? null : str(b.lastCat, 60);
+    b.paused = !!b.paused; b.interestsChosen = !!b.interestsChosen;
     return b;
   }
   const slug = s => s.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'brain';
@@ -564,11 +568,15 @@
   }
   async function importBrain(file) {
     let doc; try { doc = JSON.parse(await file.text()); } catch { toast('That is not a brain file.'); return; }
-    if (!doc || doc.app !== 'mindblown-build' || !doc.brain) { toast('That is not a MindBlown brain file.'); return; }
+    if (!doc || doc.app !== 'mindblown-build' || !doc.brain || typeof doc.brain !== 'object' || Array.isArray(doc.brain)) { toast('That is not a MindBlown brain file.'); return; }
+    if (doc.files != null && !Array.isArray(doc.files)) { toast('That brain file is damaged (files list).'); return; }
+    // parse and sanitize everything before touching storage, so a bad file can never leave the browser empty
+    let next; try { next = sanitizeBrain({ ...emptyBrain(), ...doc.brain }); } catch { toast('That brain file is damaged.'); return; }
+    const files = (doc.files || []).filter(f => f && typeof f === 'object' && typeof f.id === 'string' && typeof f.data === 'string');
     if (brain.entries.length && !(await confirmDlg('Replace the current brain?', 'The brain in this browser is replaced by the file. Save a copy first if you want to keep it.', 'Replace'))) return;
     await store.clear(); urlCache.forEach(u => URL.revokeObjectURL(u)); urlCache.clear();
-    brain = sanitizeBrain({ ...emptyBrain(), ...doc.brain });
-    for (const f of doc.files || []) { try { const bin = atob(f.data); const arr = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i); await store.putFile(f.id, new Blob([arr], { type: f.type })); } catch { /* skip a broken file */ } }
+    brain = next;
+    for (const f of files) { try { const bin = atob(f.data); const arr = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i); await store.putFile(f.id, new Blob([arr], { type: f.type })); } catch { /* skip a broken file */ } }
     await save(true); clearSelection(); graph.rebuild(true); graph.fit(); renderCats(); iv.classList.toggle('paused', brain.paused); $('iv-pause').textContent = brain.paused ? 'Resume' : 'Pause'; advance(`Welcome back, ${brain.name}.`); toast('Brain loaded.');
   }
   $('act-save').addEventListener('click', exportBrain);
