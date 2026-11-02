@@ -505,7 +505,14 @@
         if (folded) setTimeout(() => { if (selected === n) zoomTo(n, Math.max(k, kk), 700); }, 900);   // then settle on the child once it has unfolded
       }
       n.neighbors.forEach(x => spawnPulse(x.l, true));
-    } else if (n.kind === 'syn') { pulseSyn = n; if (!opts.noZoom) zoomTo(n, Math.max(k, 3.4)); }
+    } else if (n.kind === 'syn') {
+      pulseSyn = n;
+      if (!opts.noZoom) {
+        zoomTo(n, Math.max(k, 3.4));
+        // a synapse of a folded sub-neuron moves as its page unfolds, so recenter once it has settled
+        if (isChild(pageById[n.page]) && depthF < 0.97) setTimeout(() => { if (selected === n) zoomTo(n, Math.max(k, 3.4), 700); }, 900);
+      }
+    }
     else if (!opts.noZoom) zoomTo(n, Math.max(k, 3));
     renderPanel(n); panel.hidden = false;
   }
@@ -556,7 +563,7 @@
       h += `<h3>Cited by</h3><ul>` + n.pageNodes.map(p => `<li class="nb" data-id="${esc(p.id)}"><span class="sw" style="background:${lobeColor(p)}"></span><span class="t">${esc(p.title)}</span></li>`).join('') + `</ul>`;
     }
     panelBody.innerHTML = h;
-    panelBody.querySelectorAll('.nb').forEach(el => el.addEventListener('click', () => { const m = pageById[el.dataset.id]; if (m) { ensureLobe(m.lobe); select(m); } }));
+    panelBody.querySelectorAll('.nb').forEach(el => el.addEventListener('click', () => { const m = pageById[el.dataset.id]; if (m) { ensureVisible(m); select(m); } }));
     panelBody.querySelectorAll('.syn').forEach(el => el.addEventListener('click', () => {
       const s = synById[el.dataset.id]; if (!s) return;
       panelBody.querySelectorAll('.syn').forEach(x => x.classList.remove('active')); el.classList.add('active');
@@ -566,6 +573,8 @@
   }
   const srcKindShort = s => ({ session: 'session', github: D.demo ? 'code' : 'github', web: 'web', gmail: 'gmail', calendar: 'calendar', spotify: 'spotify', plaid: 'bank', memory: 'memory', wiki: 'brain' }[s.kindOf] || 'source');
   function ensureLobe(id) { if (!lobeOn[id]) { lobeOn[id] = true; renderLobeList(); rebuild(false); } }
+  // a sub-neuron needs its own lobe and its parent's lobe on before it can be selected
+  function ensureVisible(n) { if (n.kind === 'page') { if (n.parent) ensureLobe(n.parent.lobe); ensureLobe(n.lobe); } else if (n.kind === 'syn') ensureVisible(pageById[n.page]); }
 
   // ---------- lobe list ----------
   const lobeList = document.getElementById('lobe-list');
@@ -629,7 +638,7 @@
     else if (e.key === 'Enter') { choose(Math.max(activeIdx, 0)); }
   });
   function mark() { results.querySelectorAll('li').forEach((li, i) => li.classList.toggle('active', i === activeIdx)); }
-  function choose(i) { const n = resultItems[i]; if (!n) return; ensureLobe(n.lobe); hideResults(); q.blur(); select(n); }
+  function choose(i) { const n = resultItems[i]; if (!n) return; ensureVisible(n); hideResults(); q.blur(); select(n); }
   document.addEventListener('click', e => { if (!e.target.closest('.search')) hideResults(); });
 
   // ---------- boot ----------

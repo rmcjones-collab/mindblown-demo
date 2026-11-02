@@ -26,8 +26,20 @@ LOBES = [
 P = {}  # id -> page spec
 
 
-def page(pid, lobe, title, desc, n_syn, stype="project", vocab=None, sections=("How it works",)):
-    P[pid] = dict(id=pid, lobe=lobe, title=title, desc=desc, n=n_syn, type=stype, vocab=vocab or lobe, sections=list(sections))
+# sub-neurons: pages whose id starts with one of these prefixes orbit the named parent one level deeper
+PARENTS = {"projects/tidewatch-": "projects/tidewatch", "projects/orbit-kitchen-": "projects/orbit-kitchen", "projects/hollow-pines-": "projects/hollow-pines"}
+
+
+def parent_for(pid):
+    """Return the parent page id for a sub-neuron, or None for a top-level page."""
+    for prefix, parent in PARENTS.items():
+        if pid != parent and pid.startswith(prefix):
+            return parent
+    return None
+
+
+def page(pid, lobe, title, desc, n_syn, stype="project", vocab=None, sections=("How it works",), parent=None):
+    P[pid] = dict(id=pid, lobe=lobe, title=title, desc=desc, n=n_syn, type=stype, vocab=vocab or lobe, sections=list(sections), parent=parent or parent_for(pid))
 
 
 # Tidewatch — sailing weather and tide planner
@@ -191,7 +203,7 @@ def add_source(uri, pid):
 
 for pid, sp in P.items():
     srcs = pick_sources(sp["lobe"])
-    pg = dict(id=pid, title=sp["title"], type=sp["type"], lobe=sp["lobe"], desc=sp["desc"], intro=sp["desc"],
+    pg = dict(id=pid, title=sp["title"], type=sp["type"], lobe=sp["lobe"], parent=sp["parent"], desc=sp["desc"], intro=sp["desc"],
               created="2026-10-08", updated=random.choice(DAYS), synapses=[], sources=srcs, sections=sp["sections"] + ["See also"])
     for u in srcs:
         add_source(u, pid)
