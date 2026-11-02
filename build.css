@@ -183,6 +183,36 @@
 .qrow .qops button:hover { background: rgba(255, 255, 255, 0.08); color: var(--text); }
 .qrow.done .qt::after { content: ' · answered'; color: var(--text-3); font-size: 11px; }
 
+/* brain switcher (shown once the network has more than one brain) */
+.netsw { position: relative; }
+.brain-switch { display: inline-flex; align-items: center; gap: 7px; max-width: 220px; }
+.brain-switch .sw { width: 8px; height: 8px; border-radius: 50%; flex: none; box-shadow: 0 0 8px currentColor; }
+.brain-switch .caret { opacity: 0.6; font-size: 10px; }
+.brain-menu { left: 0; right: auto; min-width: 230px; }
+.brain-menu button { display: grid; grid-template-columns: 10px 1fr auto; gap: 9px; align-items: center; }
+.brain-menu button .sw { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
+.brain-menu button .n { font-size: 11px; color: var(--text-3); font-variant-numeric: tabular-nums; }
+.brain-menu button.on { color: var(--text); background: rgba(255, 255, 255, 0.06); }
+.panel .ptools button.brainy { border-color: rgba(255, 255, 255, 0.35); color: var(--text); }
+.panel .ptools button.brainy:hover { border-color: #fff; }
+
+.panel .kind { padding-right: 30px; }
+
+/* connections */
+.pa .links .nb.link { grid-template-columns: 10px 1fr auto; position: relative; }
+.pa .links .nb .t b { font-weight: 500; color: var(--text); }
+.pa .links .nb .far { font-size: 11.5px; color: var(--text-3); }
+.pa .links .nb .ops { display: none; gap: 2px; }
+.pa .links .nb:hover .ops { display: inline-flex; }
+.pa .links .nb .ops button { width: 24px; height: 24px; border: 0; border-radius: 6px; background: rgba(0, 0, 0, 0.35); color: var(--text-2); font-size: 12px; cursor: pointer; }
+.pa .links .nb .ops button:hover { color: var(--text); background: rgba(255, 255, 255, 0.12); }
+.pa .link-form label { display: block; font-size: 11.5px; color: var(--text-3); margin-top: 8px; }
+.pa .link-form label:first-child { margin-top: 0; }
+.pa .link-form select, .pa .link-form input, .pa .link-form textarea { display: block; width: 100%; margin-top: 4px; padding: 8px 10px; border-radius: 10px; border: 1px solid var(--line-strong); background: rgba(255, 255, 255, 0.04); color: var(--text); font: inherit; font-size: 13.5px; outline: none; }
+.pa .link-form select { appearance: auto; background: #151a26; }
+.pa .link-form select option, .pa .link-form select optgroup { background: #151a26; color: var(--text); }
+#brain.linking { cursor: crosshair; }
+
 /* explorer overlay */
 .explorer { position: absolute; inset: 0; z-index: 12; background: var(--bg); }
 .explorer iframe { width: 100%; height: 100%; border: 0; display: block; }
@@ -207,6 +237,7 @@
   .actions { justify-self: start; }
   .act { height: 30px; padding: 0 9px; font-size: 12px; }
   #act-explode, #act-open { display: none; }
+  .brain-switch { max-width: 150px; }
   .menu { top: 36px; }
   .interview { left: 10px; right: 10px; width: auto; top: auto; bottom: 64px; padding: 12px 14px 12px; max-height: 56vh; overflow: auto; }
   .iv-q { font-size: 18px; margin-bottom: 10px; }

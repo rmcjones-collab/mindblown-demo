@@ -70,9 +70,10 @@
   })();
 
   // ---------- model ----------
-  function emptyBrain() {
+  function emptyBrain(id = 'root', name = '') {
     return {
-      v: 1, name: '', created: today(), updated: today(), interestsChosen: false, interests: [], paused: false,
+      v: 1, id, name, origin: null, color: '#ff8a3d',   // origin: { brain, sub } when this brain was grown from a neuron of another brain
+      created: today(), updated: today(), interestsChosen: false, interests: [], paused: false,
       cats: Q.categories.map(c => ({ ...c, enabled: true, custom: false })),
       subjects: [{ id: 'me', cat: 'you', name: 'Me', starred: false, desc: 'This is you, at the centre of your brain.', created: today() }],
       entries: [],      // { id, cat, sub|null, kind: answer|note|link|file, lead, text, q, fileName, fileType, fileSize, created }
@@ -84,7 +85,26 @@
       asks: 0, lastCat: null, history: [],
     };
   }
-  let brain = null;
+  // the document is a network: one root brain plus any brains grown from its neurons, and the connections the user drew between neurons
+  function emptyNet() { return { v: 2, active: 'root', brains: [emptyBrain()], links: [] }; }
+  let net = null, brain = null;   // brain = the active one
+  const brainById = id => net.brains.find(b => b.id === id);
+  const brainLabel = b => b.name ? `${b.name}'s brain` : 'your brain';
+  // links: { id, a: {b: brainId, s: subId}, b: {...}, label, notes, strength 1..3, created }
+  const endAt = (l, bid, sid) => (l.a.b === bid && l.a.s === sid) ? 'a' : (l.b.b === bid && l.b.s === sid) ? 'b' : null;
+  const linksOf = sid => net.links.filter(l => endAt(l, brain.id, sid));
+  const otherEnd = (l, sid) => endAt(l, brain.id, sid) === 'a' ? l.b : l.a;
+  const localLinks = () => net.links.filter(l => l.a.b === brain.id && l.b.b === brain.id);
+  const endOf = e => { const b = brainById(e.b); return { brain: b, sub: b?.subjects.find(x => x.id === e.s) || null }; };
+  const sameEnd = (x, y) => x.b === y.b && x.s === y.s;
+  function addLink(a, b, label, notes = '', strength = 2) {
+    if (sameEnd(a, b)) return null;
+    const ex = net.links.find(l => (sameEnd(l.a, a) && sameEnd(l.b, b)) || (sameEnd(l.a, b) && sameEnd(l.b, a)));
+    if (ex) { ex.label = label || ex.label; if (notes) ex.notes = notes; ex.strength = strength; return ex; }
+    const l = { id: uid(), a, b, label: label || 'connected to', notes, strength, created: today() };
+    net.links.push(l); return l;
+  }
+  const removeLink = id => { net.links = net.links.filter(l => l.id !== id); };
   const catById = id => brain.cats.find(c => c.id === id);
   const subById = id => brain.subjects.find(s => s.id === id);
   const entriesOf = subId => brain.entries.filter(e => e.sub === subId);
@@ -98,7 +118,7 @@
     brain.updated = today(); dirty = true; saveFailed = false; updateStore();
     clearTimeout(saveT);
     const gen = ++saveGen;
-    const run = async () => { const ok = await store.saveBrain(JSON.parse(JSON.stringify(brain))); if (gen === saveGen) { dirty = !ok; saveFailed = !ok; } updateStore(); };
+    const run = async () => { const ok = await store.saveBrain(JSON.parse(JSON.stringify(net))); if (gen === saveGen) { dirty = !ok; saveFailed = !ok; } updateStore(); };
     if (immediate) return run();
     saveT = setTimeout(run, 400);
   }
@@ -126,8 +146,11 @@
     Object.keys(brain.answered).forEach(q => { brain.answered[q] = brain.answered[q].filter(x => x !== id); if (!brain.answered[q].length) delete brain.answered[q]; });
   }
   function removeSubject(id) {
+    const s = subById(id);
     entriesOf(id).forEach(e => removeEntry(e.id));
-    brain.subjects = brain.subjects.filter(s => s.id !== id);
+    net.links = net.links.filter(l => !endAt(l, brain.id, id));
+    if (s?.brainId) { const sb = brainById(s.brainId); if (sb) sb.origin = null; }   // the brain it grew stays in the network, now on its own
+    brain.subjects = brain.subjects.filter(s2 => s2.id !== id);
     brain.followups = brain.followups.filter(f => f.sub !== id);
     brain.interests = brain.interests.filter(i => i !== 'sub:' + id);
   }
@@ -146,6 +169,43 @@
     brain.followups = brain.followups.filter(f => f.cat !== id);
     brain.interests = brain.interests.filter(i => i !== id);
     brain.custom = brain.custom.filter(q => q.cat !== id);
+  }
+
+  // a neuron becomes a brain of its own: same interview, its own categories and files, tied back to the neuron by a synapse
+  function growBrain(s) {
+    const nb = emptyBrain('b_' + uid(), s.name); nb.origin = { brain: brain.id, sub: s.id }; nb.color = catById(s.cat)?.color || nb.color;
+    const me = nb.subjects[0]; me.name = s.name; me.desc = s.desc || `${s.name}, grown from ${brainLabel(brain)}.`;
+    const nameQ = Q.questions.find(q => q.first); const e = { id: uid(), kind: 'answer', cat: 'you', sub: 'me', lead: 'Name', text: s.name, q: nameQ?.id || 'name', created: today() };
+    nb.entries.push(e); if (nameQ) nb.answered[nameQ.id] = [e.id];
+    net.brains.push(nb); s.brainId = nb.id;
+    addLink({ b: brain.id, s: s.id }, { b: nb.id, s: 'me' }, 'same person', `${s.name} is a neuron in ${brainLabel(brain)} and the centre of their own.`, 3);
+    save(); switchBrain(nb.id, `This is ${s.name}'s brain. Answer as ${s.name}, or as well as you know them.`);
+  }
+  function switchBrain(id, ack) {
+    const b = brainById(id); if (!b) return;
+    net.active = id; brain = b; clearSelection(); graph.rebuild(true); graph.fit(); renderCats(); renderModal(); renderBrainSwitch();
+    iv.classList.toggle('paused', brain.paused); $('iv-pause').textContent = brain.paused ? 'Resume' : 'Pause';
+    advance(ack || (b.origin ? `Back in ${b.name}'s brain.` : `Back in your brain, ${b.name}.`)); save();
+  }
+  function renderBrainSwitch() {
+    const btn = $('brain-switch'), menu = $('brain-menu');
+    btn.hidden = net.brains.length < 2;
+    btn.innerHTML = `<span class="sw" style="background:${esc(brain.color)}"></span>${esc(brainLabel(brain))} <span class="caret">▾</span>`;
+    const depth = b => { let d = 0, cur = b; while (cur?.origin && d < 12) { cur = brainById(cur.origin.brain); d++; } return d; };
+    menu.innerHTML = net.brains.map(b => `<button role="menuitem" data-brain="${esc(b.id)}" class="${b === brain ? 'on' : ''}" style="padding-left:${10 + depth(b) * 14}px"><span class="sw" style="background:${esc(b.color)}"></span>${esc(brainLabel(b))}<span class="n">${b.subjects.length - 1}</span></button>`).join('');
+    menu.querySelectorAll('[data-brain]').forEach(x => x.addEventListener('click', () => { menu.hidden = true; switchBrain(x.dataset.brain); }));
+    document.title = net.brains.length > 1 ? `MindBlown: Build — ${brainLabel(brain)}` : 'MindBlown: Build — grow your own brain';
+    $('m-delete-brain').hidden = !brain.origin;
+  }
+  async function deleteBrain(b) {
+    const n = b.subjects.length - 1, files = b.entries.filter(isFile);
+    if (!(await confirmDlg(`Delete ${brainLabel(b)}?`, `${pw(n, 'neuron')}, ${pw(b.entries.length, 'synapse')} and ${pw(files.length, 'file')} go with it. The neuron it grew from stays.`, 'Delete brain'))) return;
+    files.forEach(e => { store.delFile(e.id); revoke(e.id); });
+    net.links = net.links.filter(l => l.a.b !== b.id && l.b.b !== b.id);
+    net.brains.forEach(o => { if (o.origin?.brain === b.id) o.origin = null; o.subjects.forEach(s => { if (s.brainId === b.id) delete s.brainId; }); });
+    const back = b.origin?.brain && brainById(b.origin.brain) ? b.origin.brain : net.brains[0].id;
+    net.brains = net.brains.filter(o => o !== b);
+    switchBrain(back, `${b.name}'s brain is gone.`);
   }
 
   // object URLs for file previews
@@ -212,7 +272,7 @@
     if (!q) { ivQ.textContent = brain.paused ? 'Interview paused.' : 'That is everything I have for now.'; ivCtx.innerHTML = ''; ivInput.hidden = true; ivTools.hidden = true; if (!brain.paused) ivEmpty.hidden = false; return; }
     const c = catById(q.cat);
     ivQ.textContent = fill(q.text, { sub: q.sub, cat: c?.name });
-    ivCtx.innerHTML = c ? `<span class="sw" style="background:${c.color};color:${c.color}"></span>${esc(c.name)}${q.sub ? ' · ' + esc(q.sub) : ''}${q.source === 'follow-up' ? ' · follow-up' : q.source === 'starred' ? ' · starred' : ''}` : '';
+    ivCtx.innerHTML = c ? `<span class="sw" style="background:${c.color};color:${c.color}"></span>${esc(c.name)}${q.sub ? ' · ' + esc(q.sub) : ''}${q.source === 'follow-up' ? ' · follow-up' : q.source === 'starred' ? ' · starred' : ''}${brain.origin ? ` · ${esc(brain.name)}'s brain` : ''}` : '';
     ivAnswer.value = ''; ivAnswer.style.height = 'auto';
     ivAnswer.placeholder = q.type === 'list' && q.list ? 'Separate items with commas…' : q.type === 'date' ? 'A date, a year, or roughly when…' : q.type === 'files' ? 'Optional note about these files…' : 'Type your answer…';
     if (q.type === 'choice') { ivOpts.hidden = false; ivOpts.innerHTML = q.options.map(o => `<button type="button" data-v="${esc(o)}">${esc(o)}</button>`).join(''); ivOpts.querySelectorAll('button').forEach(b => b.addEventListener('click', () => answer(b.dataset.v))); }
@@ -228,7 +288,7 @@
   }
   function advance(ack) {
     if (brain.paused) { showQuestion(null); return; }
-    if (brain.name && !brain.interestsChosen) { showInterests(); return; }
+    if (brain.name && !brain.interestsChosen) { showInterests(ack); return; }
     showQuestion(nextQuestion(), ack);
   }
   const randomAck = () => Q.acks[Math.floor(Math.random() * Q.acks.length)];
@@ -308,10 +368,10 @@
   }
 
   // ---------- interests picker ----------
-  function showInterests() {
+  function showInterests(ack) {
     mode = 'interests'; current = null;
-    ivAck.textContent = `Good to meet you, ${brain.name}.`;
-    ivQ.textContent = 'What would you like me to ask about most?'; ivCtx.innerHTML = '';
+    ivAck.textContent = ack || `Good to meet you, ${brain.name}.`;
+    ivQ.textContent = brain.origin ? `What should I ask about ${brain.name} most?` : 'What would you like me to ask about most?'; ivCtx.innerHTML = '';
     [ivOpts, ivFiles, ivEmpty].forEach(el => el.hidden = true); ivInput.hidden = true; ivTools.hidden = true; ivInterests.hidden = false;
     renderChips($('interest-chips'));
   }
@@ -388,19 +448,29 @@
   async function renderSubPanel(s) {
     const c = catById(s.cat); const es = entriesOf(s.id); const files = es.filter(isFile), notes = es.filter(e => !isFile(e));
     const me = s.id === 'me';
-    let h = `<div class="kind"><span class="sw" style="background:${c.color};color:${c.color}"></span>${me ? 'centre' : 'neuron'} · ${esc(c.name)}</div>`;
+    const grown = s.brainId ? brainById(s.brainId) : null, origin = me && brain.origin ? brainById(brain.origin.brain) : null;
+    const conns = linksOf(s.id);
+    let h = `<div class="kind"><span class="sw" style="background:${c.color};color:${c.color}"></span>${me ? 'centre' : 'neuron'} · ${esc(c.name)}${grown ? ' · own brain' : origin ? ` · grown from ${esc(brainLabel(origin))}` : ''}</div>`;
     h += `<h2 contenteditable="true" spellcheck="false" id="p-title" title="Click to rename">${esc(s.name)}</h2>`;
     h += `<p class="desc" id="p-desc" contenteditable="true" data-ph="Add a line about this…">${esc(s.desc || '')}</p>`;
-    h += `<div class="ptools">${me ? '' : `<button data-t="star" class="${s.starred ? 'on' : ''}" title="Ask me more about this">★ ${s.starred ? 'Asking more' : 'Ask me more'}</button>`}${me ? '' : '<button data-t="move">Move to…</button><button data-t="del" class="danger">Delete</button>'}</div>`;
-    h += `<div class="meta"><span>${pw(notes.length, 'synapse')}</span><span>${pw(files.length, 'file')}</span><span>added ${esc(s.created)}</span></div>`;
+    h += `<div class="ptools">${me ? '' : `<button data-t="star" class="${s.starred ? 'on' : ''}" title="Ask me more about this">★ ${s.starred ? 'Asking more' : 'Ask me more'}</button>`}`;
+    h += grown ? `<button data-t="open-brain" class="brainy" title="Open this neuron's own brain">Open ${esc(s.name)}'s brain →</button>` : origin ? `<button data-t="back" title="Return to the brain this one grew from">← ${esc(brainLabel(origin))}</button>` : me ? '' : `<button data-t="grow" class="brainy" title="Give this neuron a brain of its own, connected to this one">Grow into a brain</button>`;
+    h += `${me ? '' : '<button data-t="move">Move to…</button><button data-t="del" class="danger">Delete</button>'}</div>`;
+    h += `<div class="meta"><span>${pw(notes.length, 'synapse')}</span><span>${pw(conns.length, 'connection')}</span><span>${pw(files.length, 'file')}</span><span>added ${esc(s.created)}</span></div>`;
     h += `<div class="pa">`;
     h += `<h3>Synapses <span>${notes.length}</span></h3>`;
     h += notes.length ? `<ul>${notes.map(entryHtml).join('')}</ul>` : `<div class="empty">Nothing here yet. Answer a question about it, or add a note.</div>`;
+    h += `<h3>Connections <span>${conns.length}</span></h3>`;
+    h += conns.length ? `<ul class="links">${conns.map(l => linkHtml(l, s.id)).join('')}</ul>` : `<div class="empty">No connections yet. Link ${esc(s.name)} to anything else in your network and say how they relate.</div>`;
+    h += `<div class="add-row"><button data-add="link">+ Connect to…</button><button data-add="link-pick" title="Then click another neuron on the canvas">Pick on canvas</button><span class="slot-link"></span></div>`;
     h += `<h3>Files <span>${files.length}</span></h3>` + (files.length ? await filesHtml(files) : `<div class="empty">Pictures, documents, anything.</div>`);
     h += adderHtml + `</div>`;
-    panelBody.innerHTML = h; wirePanel({ cat: s.cat, sub: s.id });
+    panelBody.innerHTML = h; wirePanel({ cat: s.cat, sub: s.id }); wireLinks(s);
+    panelBody.querySelector('[data-t=grow]')?.addEventListener('click', async () => { if (await ask({ title: `Grow ${s.name} into a brain?`, text: `${s.name} becomes the centre of a new brain with its own categories, questions and files. It stays connected to this neuron by a synapse, and you can switch between brains any time.`, ok: 'Grow' })) growBrain(s); });
+    panelBody.querySelector('[data-t=open-brain]')?.addEventListener('click', () => switchBrain(s.brainId));
+    panelBody.querySelector('[data-t=back]')?.addEventListener('click', () => switchBrain(brain.origin.brain));
     const title = $('p-title');
-    title.addEventListener('blur', () => { const v = title.textContent.trim(); if (v && v !== s.name) { s.name = v; if (me) brain.name = v; save(); graph.rebuild(); renderCats(); } else title.textContent = s.name; });
+    title.addEventListener('blur', () => { const v = title.textContent.trim(); if (v && v !== s.name) { renameSubject(s, v); save(); graph.rebuild(); renderCats(); renderBrainSwitch(); } else title.textContent = s.name; });
     title.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); title.blur(); } });
     const desc = $('p-desc');
     desc.addEventListener('blur', () => { const v = desc.textContent.trim(); if (v !== (s.desc || '')) { s.desc = v; save(); } });
@@ -411,8 +481,72 @@
       let target = brain.cats.find(c2 => c2.name.toLowerCase() === v.toLowerCase()) || addCategory(v);
       s.cat = target.id; entriesOf(s.id).forEach(e => e.cat = target.id); save(); graph.rebuild(); renderCats(); refreshPanel(); toast(`Moved to ${target.name}.` + (names.includes(target.name) ? '' : ' New category created.'));
     });
-    panelBody.querySelector('[data-t=del]')?.addEventListener('click', async () => { if (await confirmDlg(`Delete “${s.name}”?`, `${pw(notes.length, 'synapse')} and ${pw(files.length, 'file')} go with it.`)) { removeSubject(s.id); save(); graph.rebuild(); renderCats(); clearSelection(); } });
+    panelBody.querySelector('[data-t=del]')?.addEventListener('click', async () => { if (await confirmDlg(`Delete “${s.name}”?`, `${pw(notes.length, 'synapse')}, ${pw(conns.length, 'connection')} and ${pw(files.length, 'file')} go with it.${grown ? ` ${s.name}'s brain stays in the network on its own.` : ''}`)) { removeSubject(s.id); save(); graph.rebuild(); renderCats(); renderBrainSwitch(); clearSelection(); } });
     panel.scrollTop = 0;
+  }
+  // a neuron, the brain it grew and the neuron a brain grew from all share one name
+  function renameSubject(s, v) {
+    s.name = v;
+    if (s.id === 'me') { brain.name = v; if (brain.origin) { const o = endOf(brain.origin).sub; if (o) o.name = v; } }
+    if (s.brainId) { const b = brainById(s.brainId); if (b) { b.name = v; const m = b.subjects.find(x => x.id === 'me'); if (m) m.name = v; } }
+  }
+
+  // ---------- connections between neurons ----------
+  const strengthName = v => v >= 3 ? 'strong' : v <= 1 ? 'faint' : '';
+  function linkHtml(l, sid) {
+    const o = otherEnd(l, sid), { brain: ob, sub: os } = endOf(o);
+    if (!os) return '';
+    const away = ob !== brain, col = away ? ob.color : (catById(os.cat)?.color || '#9aa');
+    return `<li class="nb link" data-link="${esc(l.id)}" data-to-brain="${esc(o.b)}" data-to-sub="${esc(o.s)}"><span class="sw" style="background:${esc(col)}"></span><span class="t"><b>${esc(l.label)}</b> → ${esc(os.name)}${away ? ` <span class="far">in ${esc(brainLabel(ob))}</span>` : ''}<span class="note">${esc(l.notes || '')}${l.notes && strengthName(l.strength) ? ' · ' : ''}${strengthName(l.strength)}</span></span><span class="ops"><button data-op="edit" title="Edit connection">✎</button><button data-op="del" title="Remove connection">×</button></span></li>`;
+  }
+  // every neuron a connection could go to: this brain grouped by category, then the other brains
+  function targetOptions(sid, chosen) {
+    const opt = (b, s2) => `<option value="${esc(b.id)}|${esc(s2.id)}" ${chosen && chosen.b === b.id && chosen.s === s2.id ? 'selected' : ''}>${esc(s2.name)}</option>`;
+    let h = brain.cats.map(c => { const subs = subsOf(c.id).filter(s2 => s2.id !== sid); return subs.length ? `<optgroup label="${esc(c.name)}">${subs.map(s2 => opt(brain, s2)).join('')}</optgroup>` : ''; }).join('');
+    net.brains.filter(b => b !== brain).forEach(b => { h += `<optgroup label="${esc(brainLabel(b))}">${b.subjects.map(s2 => opt(b, s2)).join('')}</optgroup>`; });
+    return h;
+  }
+  function linkForm(s, existing) {
+    const old = panelBody.querySelector('.adder'); if (old) old.remove();
+    const box = document.createElement('div'); box.className = 'adder link-form';
+    const chosen = existing ? otherEnd(existing, s.id) : null;
+    box.innerHTML = `<label>Connect ${esc(s.name)} to<select data-f="to"><option value="">Choose a neuron…</option>${targetOptions(s.id, chosen)}</select></label>
+      <label>How are they connected?<input data-f="label" placeholder="mother of · works with · lives at · inspired by…" maxlength="120" value="${esc(existing?.label || '')}"></label>
+      <label>Anything about this connection<textarea data-f="notes" rows="3" placeholder="How you met, what you share, dates, the story…">${esc(existing?.notes || '')}</textarea></label>
+      <label>Strength<select data-f="strength"><option value="1" ${existing?.strength === 1 ? 'selected' : ''}>Faint</option><option value="2" ${!existing || existing.strength === 2 ? 'selected' : ''}>Normal</option><option value="3" ${existing?.strength === 3 ? 'selected' : ''}>Strong</option></select></label>
+      <div class="row"><button data-c>Cancel</button><button data-ok class="primary">${existing ? 'Save' : 'Connect'}</button></div>`;
+    panelBody.querySelector('.slot-link').closest('.add-row').insertAdjacentElement('afterend', box);
+    const f = k => box.querySelector(`[data-f=${k}]`);
+    (existing ? f('label') : f('to')).focus();
+    box.querySelector('[data-c]').addEventListener('click', () => box.remove());
+    box.querySelector('[data-ok]').addEventListener('click', () => {
+      const [tb, ts] = f('to').value.split('|'); if (!tb || !ts) { f('to').focus(); return; }
+      const label = f('label').value.trim() || 'connected to', notes = f('notes').value.trim(), strength = +f('strength').value || 2;
+      if (existing) { const to = { b: tb, s: ts }; const mine = endAt(existing, brain.id, s.id); existing[mine === 'a' ? 'b' : 'a'] = to; existing.label = label; existing.notes = notes; existing.strength = strength; }
+      else addLink({ b: brain.id, s: s.id }, { b: tb, s: ts }, label, notes, strength);
+      save(); graph.rebuild(); refreshPanel(); toast(existing ? 'Connection updated.' : `Connected to ${endOf({ b: tb, s: ts }).sub?.name || 'it'}.`);
+    });
+  }
+  function wireLinks(s) {
+    panelBody.querySelectorAll('.links [data-link]').forEach(li => {
+      const l = net.links.find(x => x.id === li.dataset.link); if (!l) return;
+      li.addEventListener('click', e => {
+        if (e.target.closest('[data-op]')) return;
+        const tb = li.dataset.toBrain, ts = li.dataset.toSub;
+        if (tb !== brain.id) { switchBrain(tb); setTimeout(() => selectSub(ts), 60); } else selectSub(ts);
+      });
+      li.querySelector('[data-op=edit]').addEventListener('click', e => { e.stopPropagation(); linkForm(s, l); });
+      li.querySelector('[data-op=del]').addEventListener('click', async e => { e.stopPropagation(); if (await confirmDlg('Remove this connection?', `${l.label} → ${endOf(otherEnd(l, s.id)).sub?.name || ''}`, 'Remove')) { removeLink(l.id); save(); graph.rebuild(); refreshPanel(); } });
+    });
+    panelBody.querySelector('[data-add=link]').addEventListener('click', () => linkForm(s, null));
+    panelBody.querySelector('[data-add=link-pick]').addEventListener('click', () => { if (brain.subjects.length < 2) { toast('Nothing else to connect to yet.'); return; } graph.linkFrom = s.id; toast(`Click the neuron to connect ${s.name} to. Esc cancels.`); });
+  }
+  // the canvas picked a target: make the connection and open its details
+  async function linkPicked(fromId, toId) {
+    const a = subById(fromId), b = subById(toId); if (!a || !b || a === b) return;
+    const label = await promptDlg(`How is ${a.name} connected to ${b.name}?`, '', 'Connect'); if (label === null) return;
+    addLink({ b: brain.id, s: a.id }, { b: brain.id, s: b.id }, label || 'connected to', '', 2);
+    save(); graph.rebuild(); selectSub(a.id, true); toast(`${a.name} → ${b.name}. Add notes under Connections.`);
   }
   async function renderCatPanel(c) {
     const subs = subsOf(c.id); const es = catEntries(c.id); const files = es.filter(isFile), notes = es.filter(e => !isFile(e));
@@ -458,7 +592,7 @@
     }));
     const slot = panelBody.querySelector('.add-row .slot');
     panelBody.querySelectorAll('[data-add]').forEach(b => b.addEventListener('click', () => {
-      const t = b.dataset.add; if (t === 'sub') return;
+      const t = b.dataset.add; if (t === 'sub' || t === 'link' || t === 'link-pick') return;
       if (t === 'file') { const inp = document.createElement('input'); inp.type = 'file'; inp.multiple = true; inp.addEventListener('change', async () => { for (const f of inp.files) await attachFile(f, where.cat, where.sub); save(); graph.rebuild(); renderCats(); refreshPanel(); toast(pw(inp.files.length, 'file') + ' added.'); }); inp.click(); return; }
       const old = panelBody.querySelector('.adder'); if (old) old.remove();
       const box = document.createElement('div'); box.className = 'adder';
@@ -538,21 +672,27 @@
   const moreMenu = $('more-menu');
   $('act-more').addEventListener('click', e => { e.stopPropagation(); moreMenu.hidden = !moreMenu.hidden; });
   document.addEventListener('click', e => { if (!e.target.closest('.actions')) moreMenu.hidden = true; });
-  $('m-rename').addEventListener('click', async () => { moreMenu.hidden = true; const v = await promptDlg('What should I call you?', brain.name); if (v) { brain.name = v; subById('me').name = v; save(); graph.rebuild(); refreshPanel(); } });
-  $('m-reset').addEventListener('click', async () => { moreMenu.hidden = true; if (await confirmDlg('Start over with an empty brain?', 'Everything in this browser is erased. Save a copy first if you want to keep it.', 'Erase everything')) { await store.clear(); urlCache.forEach((u) => URL.revokeObjectURL(u)); urlCache.clear(); brain = emptyBrain(); await save(true); clearSelection(); graph.rebuild(true); graph.fit(); renderCats(); iv.classList.remove('paused'); $('iv-pause').textContent = 'Pause'; advance(); toast('Fresh brain.'); } });
+  $('m-rename').addEventListener('click', async () => { moreMenu.hidden = true; const v = await promptDlg(brain.origin ? 'Rename this brain' : 'What should I call you?', brain.name); if (v) { renameSubject(subById('me'), v); save(); graph.rebuild(); refreshPanel(); renderBrainSwitch(); } });
+  $('m-delete-brain').addEventListener('click', () => { moreMenu.hidden = true; if (brain.origin) deleteBrain(brain); });
+  $('m-reset').addEventListener('click', async () => { moreMenu.hidden = true; if (await confirmDlg('Start over with an empty brain?', `Everything in this browser is erased${net.brains.length > 1 ? `, all ${net.brains.length} brains` : ''}. Save a copy first if you want to keep it.`, 'Erase everything')) { await store.clear(); urlCache.forEach((u) => URL.revokeObjectURL(u)); urlCache.clear(); net = emptyNet(); brain = net.brains[0]; await save(true); clearSelection(); graph.rebuild(true); graph.fit(); renderCats(); renderBrainSwitch(); iv.classList.remove('paused'); $('iv-pause').textContent = 'Pause'; advance(); toast('Fresh brain.'); } });
+  const brainMenu = $('brain-menu');
+  $('brain-switch').addEventListener('click', e => { e.stopPropagation(); brainMenu.hidden = !brainMenu.hidden; moreMenu.hidden = true; });
+  document.addEventListener('click', e => { if (!e.target.closest('.netsw')) brainMenu.hidden = true; });
   $('m-export-data').addEventListener('click', () => { moreMenu.hidden = true; download(`window.MINDBLOWN = ${JSON.stringify(toDataset())};\n`, `${slug(brain.name || 'brain')}-data.js`, 'text/javascript'); toast('Dataset downloaded. Drop it into a MindBlown page as data.js.'); });
   // A brain file is untrusted input: constrain every value that reaches HTML attributes or the layout.
   const safeColor = v => /^#[0-9a-f]{3,8}$/i.test(String(v)) ? String(v) : '#9aa4b8';
   const safeDate = v => /^\d{4}-\d{2}-\d{2}$/.test(String(v)) ? String(v) : today();
   const str = (v, max = 4000) => typeof v === 'string' ? v.slice(0, max) : v == null ? '' : String(v).slice(0, max);
+  const arr = v => Array.isArray(v) ? v.filter(x => x && typeof x === 'object') : [];
   function sanitizeBrain(b) {
     const base = emptyBrain();
-    const arr = v => Array.isArray(v) ? v.filter(x => x && typeof x === 'object') : [];
+    b.id = str(b.id, 60) || 'root'; b.color = safeColor(b.color);
+    b.origin = b.origin && typeof b.origin === 'object' && typeof b.origin.brain === 'string' && typeof b.origin.sub === 'string' ? { brain: str(b.origin.brain, 60), sub: str(b.origin.sub, 60) } : null;
     b.name = str(b.name, 80); b.created = safeDate(b.created); b.updated = safeDate(b.updated);
     b.cats = !Array.isArray(b.cats) ? base.cats : arr(b.cats).map(c => ({ id: str(c.id, 60), name: str(c.name, 80) || 'Category', color: safeColor(c.color), enabled: c.enabled !== false, custom: !!c.custom, desc: str(c.desc, 400), icon: str(c.icon, 8) }));
     if (!b.cats.some(c => c.id !== 'you')) b.cats = base.cats; // nothing usable: restore the default set
     if (!b.cats.some(c => c.id === 'you')) b.cats.unshift(base.cats[0]);
-    b.subjects = arr(b.subjects).map(s => ({ id: str(s.id, 60), cat: str(s.cat, 60), name: str(s.name, 120) || 'Neuron', starred: !!s.starred, desc: str(s.desc, 600), created: safeDate(s.created) }));
+    b.subjects = arr(b.subjects).map(s => ({ id: str(s.id, 60), cat: str(s.cat, 60), name: str(s.name, 120) || 'Neuron', starred: !!s.starred, desc: str(s.desc, 600), created: safeDate(s.created), ...(typeof s.brainId === 'string' ? { brainId: str(s.brainId, 60) } : {}) }));
     if (!b.subjects.some(s => s.id === 'me')) b.subjects.unshift({ ...base.subjects[0], name: b.name || 'Me' });
     const kinds = ['answer', 'note', 'link', 'file'];
     b.entries = arr(b.entries).map(e => ({ id: str(e.id, 60), kind: kinds.includes(e.kind) ? e.kind : 'note', lead: str(e.lead, 300), text: str(e.text, 20000), q: str(e.q, 120), sub: e.sub == null ? null : str(e.sub, 60), cat: str(e.cat, 60), created: safeDate(e.created), fileName: str(e.fileName, 255), fileType: str(e.fileType, 120), fileSize: Number(e.fileSize) || 0 }));
@@ -568,6 +708,25 @@
     b.paused = !!b.paused; b.interestsChosen = !!b.interestsChosen;
     return b;
   }
+  // a saved document is either a network (v2) or a single brain (v1); either way every cross-reference must point at something that exists
+  function sanitizeNet(doc) {
+    const n = Array.isArray(doc.brains) ? { ...emptyNet(), ...doc } : { ...emptyNet(), brains: [doc] };
+    n.brains = arr(n.brains).map(b => sanitizeBrain({ ...emptyBrain(), ...b }));
+    if (!n.brains.length) n.brains = [emptyBrain()];
+    const seen = new Set(); n.brains = n.brains.filter(b => !seen.has(b.id) && seen.add(b.id));
+    const ids = new Set(n.brains.map(b => b.id)), has = (bid, sid) => n.brains.find(b => b.id === bid)?.subjects.some(s => s.id === sid);
+    n.brains.forEach(b => {
+      if (b.origin && (b.origin.brain === b.id || !has(b.origin.brain, b.origin.sub))) b.origin = null;
+      b.subjects.forEach(s => { if (s.brainId && (s.brainId === b.id || !ids.has(s.brainId))) delete s.brainId; });
+    });
+    // the first brain is the root: it has no origin, and no brain may be its own ancestor
+    n.brains[0].origin = null;
+    n.brains.forEach(b => { let cur = b, hops = 0; while (cur?.origin && hops < 50) { cur = n.brains.find(x => x.id === cur.origin.brain); hops++; if (cur === b) { b.origin = null; break; } } });
+    const end = e => e && typeof e === 'object' && typeof e.b === 'string' && typeof e.s === 'string' && has(e.b, e.s) ? { b: str(e.b, 60), s: str(e.s, 60) } : null;
+    n.links = arr(n.links).map(l => { const a = end(l.a), b = end(l.b); return a && b && !(a.b === b.b && a.s === b.s) ? { id: str(l.id, 60) || uid(), a, b, label: str(l.label, 120) || 'connected to', notes: str(l.notes, 2000), strength: [1, 2, 3].includes(l.strength) ? l.strength : 2, created: safeDate(l.created) } : null; }).filter(Boolean);
+    n.active = ids.has(n.active) ? n.active : n.brains[0].id; n.v = 2;
+    return n;
+  }
   const slug = s => s.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'brain';
   function download(content, name, type) { const b = content instanceof Blob ? content : new Blob([content], { type }); const u = URL.createObjectURL(b); const a = document.createElement('a'); a.href = u; a.download = name; document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(u), 4000); }
 
@@ -575,51 +734,78 @@
   const blobToB64 = blob => new Promise(res => { const r = new FileReader(); r.onload = () => res(String(r.result).split(',')[1] || ''); r.readAsDataURL(blob); });
   async function exportBrain() {
     const files = [];
-    for (const e of brain.entries.filter(isFile)) { const b = await store.getFile(e.id); if (b) files.push({ id: e.id, name: e.fileName, type: e.fileType, data: await blobToB64(b) }); }
-    download(JSON.stringify({ app: 'mindblown-build', v: 1, exported: new Date().toISOString(), brain, files }), `${slug(brain.name || 'brain')}.mindblown.json`, 'application/json');
-    toast(`Saved ${slug(brain.name || 'brain')}.mindblown.json`);
+    for (const b of net.brains) for (const e of b.entries.filter(isFile)) { const bl = await store.getFile(e.id); if (bl) files.push({ id: e.id, name: e.fileName, type: e.fileType, data: await blobToB64(bl) }); }
+    const nm = slug(net.brains[0].name || 'brain');
+    download(JSON.stringify({ app: 'mindblown-build', v: 2, exported: new Date().toISOString(), brain: net, files }), `${nm}.mindblown.json`, 'application/json');
+    toast(`Saved ${nm}.mindblown.json${net.brains.length > 1 ? ` · ${net.brains.length} brains` : ''}`);
   }
   async function importBrain(file) {
     let doc; try { doc = JSON.parse(await file.text()); } catch { toast('That is not a brain file.'); return; }
     if (!doc || doc.app !== 'mindblown-build' || !doc.brain || typeof doc.brain !== 'object' || Array.isArray(doc.brain)) { toast('That is not a MindBlown brain file.'); return; }
     if (doc.files != null && !Array.isArray(doc.files)) { toast('That brain file is damaged (files list).'); return; }
     // parse and sanitize everything before touching storage, so a bad file can never leave the browser empty
-    let next; try { next = sanitizeBrain({ ...emptyBrain(), ...doc.brain }); } catch { toast('That brain file is damaged.'); return; }
+    let next; try { next = sanitizeNet(doc.brain); } catch { toast('That brain file is damaged.'); return; }
     const files = (doc.files || []).filter(f => f && typeof f === 'object' && typeof f.id === 'string' && typeof f.data === 'string');
-    if (brain.entries.length && !(await confirmDlg('Replace the current brain?', 'The brain in this browser is replaced by the file. Save a copy first if you want to keep it.', 'Replace'))) return;
+    if (net.brains.some(b => b.entries.length) && !(await confirmDlg('Replace the current brain?', 'The brain in this browser is replaced by the file. Save a copy first if you want to keep it.', 'Replace'))) return;
     const blobs = [];
     for (const f of files) { try { const bin = atob(f.data); const arr = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i); blobs.push({ id: f.id, blob: new Blob([arr], { type: str(f.type, 120) || 'application/octet-stream' }) }); } catch { /* skip a broken file */ } }
-    next.updated = today();
+    next.brains.forEach(b => { b.updated = today(); });
     try { await store.replaceAll(JSON.parse(JSON.stringify(next)), blobs); }
     catch (e) { console.warn('import failed', e); toast('Could not store that brain. Nothing was changed.'); return; }
     urlCache.forEach(u => URL.revokeObjectURL(u)); urlCache.clear();
-    brain = next; dirty = false; saveFailed = false; updateStore(); clearSelection(); graph.rebuild(true); graph.fit(); renderCats(); iv.classList.toggle('paused', brain.paused); $('iv-pause').textContent = brain.paused ? 'Resume' : 'Pause'; advance(`Welcome back, ${brain.name}.`); toast('Brain loaded.');
+    net = next; brain = brainById(net.active); dirty = false; saveFailed = false; updateStore(); clearSelection(); graph.rebuild(true); graph.fit(); renderCats(); renderBrainSwitch(); iv.classList.toggle('paused', brain.paused); $('iv-pause').textContent = brain.paused ? 'Resume' : 'Pause'; advance(`Welcome back, ${brain.name}.`); toast(next.brains.length > 1 ? `${next.brains.length} brains loaded.` : 'Brain loaded.');
   }
   $('act-save').addEventListener('click', exportBrain);
   $('act-open').addEventListener('click', () => $('file-open').click());
   $('file-open').addEventListener('change', () => { const f = $('file-open').files[0]; $('file-open').value = ''; if (f) importBrain(f); });
-  window.addEventListener('beforeunload', () => { if (dirty) store.saveBrain(JSON.parse(JSON.stringify(brain))); });
+  window.addEventListener('beforeunload', () => { if (dirty) store.saveBrain(JSON.parse(JSON.stringify(net))); });
 
   // ---------- the full explorer: translate the live brain into a MindBlown dataset ----------
+  // One brain becomes a plain dataset. Several become the renderer's network form: every id namespaced "<brain>:<id>",
+  // each brain with its own hub lobe (self: true) and brain-tagged lobes, and the user's connections as links between them.
   function toDataset() {
+    const multi = net.brains.length > 1;
     const lobeId = c => c === 'you' ? 'self' : c;
-    const subs = brain.subjects, byName = subs.map(s => ({ s, re: s.name.length >= 3 ? new RegExp(`\\b${s.name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'i') : null }));
-    const pages = subs.map(s => { const es = entriesOf(s.id); const notes = es.filter(e => !isFile(e)); return { id: s.id, title: s.name, type: s.id === 'me' ? 'person' : 'neuron', lobe: lobeId(s.cat), parent: null, desc: s.desc || notes[0]?.text?.slice(0, 160) || '', intro: '', created: s.created, updated: brain.updated, synapses: notes.map(e => e.id) }; });
-    const linkW = {}; const synLinks = [];
-    const synapses = [];
-    brain.entries.filter(e => !isFile(e) && e.sub).forEach(e => {
-      const links = byName.filter(x => x.re && x.s.id !== e.sub && x.re.test(e.text)).map(x => x.s.id).slice(0, 4);
-      links.forEach(t => { synLinks.push({ s: e.id, t }); const key = [e.sub, t].sort().join('|'); linkW[key] = (linkW[key] || 0) + 1; });
-      synapses.push({ id: e.id, page: e.sub, lead: e.lead || e.kind, text: e.text, section: e.kind === 'answer' ? 'Answers' : e.kind === 'link' ? 'Links' : 'Notes', links, cites: [] });
+    const mp = (bid, sid) => multi ? `${bid}:${sid}` : sid, ml = (bid, cid) => multi ? `${bid}:${lobeId(cid)}` : lobeId(cid);
+    const shift = (hex, deg) => { const c = d3.hsl(d3.color(hex) || d3.color('#999')); c.h = ((c.h || 0) + deg) % 360; return c.formatHex(); };
+    const out = { lobes: [], pages: [], synapses: [], sources: [], links: [], synLinks: [], cocite: [], brains: [], centers: [], built: today(), demo: false };
+    const linkIx = {};
+    const pushLink = (a, b, w, kind, note) => { const key = [a, b].sort().join('|'); const ex = linkIx[key]; if (ex) { ex.w += w; if (!ex.kinds.includes(kind)) ex.kinds.push(kind); if (note && !ex.notes.includes(note)) ex.notes.push(note); } else { linkIx[key] = { s: a, t: b, w, kinds: [kind], notes: note ? [note] : [] }; out.links.push(linkIx[key]); } };
+    net.brains.forEach((b, bi) => {
+      const subs = b.subjects, eOf = sid => b.entries.filter(e => e.sub === sid);
+      const byName = subs.map(s2 => ({ s: s2, re: s2.name.length >= 3 ? new RegExp(`\\b${s2.name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'i') : null }));
+      const used = new Set(subs.map(s2 => s2.cat));
+      b.cats.filter(c => used.has(c.id)).forEach(c => {
+        const self = c.id === 'you';
+        const l = { id: ml(b.id, c.id), name: self && multi ? b.name || 'Me' : bi && !self ? `${b.name} · ${c.name}` : c.name, color: self ? (multi ? b.color : c.color) : bi ? shift(c.color, 40 * bi) : c.color, hidden: false };
+        if (multi) { l.brain = b.id; l.self = self; }
+        out.lobes.push(l);
+      });
+      subs.forEach(s2 => {
+        const es = eOf(s2.id), notes = es.filter(e => !isFile(e));
+        const p = { id: mp(b.id, s2.id), title: s2.name, type: s2.id === 'me' ? 'person' : s2.brainId ? 'brain' : 'neuron', lobe: ml(b.id, s2.cat), parent: null, desc: s2.desc || notes[0]?.text?.slice(0, 160) || '', intro: '', created: s2.created, updated: b.updated, synapses: notes.map(e => e.id) };
+        if (multi) { p.brain = b.id; p.orig = s2.id; }
+        out.pages.push(p);
+        notes.forEach(e => {
+          const links = byName.filter(x => x.re && x.s.id !== s2.id && x.re.test(e.text)).map(x => x.s.id).slice(0, 4);
+          links.forEach(t => { out.synLinks.push({ s: e.id, t: mp(b.id, t) }); pushLink(mp(b.id, s2.id), mp(b.id, t), 1, 'mention', 'mentioned in a synapse'); });
+          out.synapses.push({ id: e.id, page: mp(b.id, s2.id), lead: e.lead || e.kind, text: e.text, section: e.kind === 'answer' ? 'Answers' : e.kind === 'link' ? 'Links' : 'Notes', links: links.map(t => mp(b.id, t)), cites: [] });
+        });
+        es.filter(isFile).forEach(e => out.sources.push({ id: 'file:' + e.id, label: e.fileName, kind: isImage(e) ? 'image' : 'file', pages: [mp(b.id, s2.id)] }));
+        if (s2.id !== 'me') pushLink(mp(b.id, 'me'), mp(b.id, s2.id), s2.cat === 'you' ? 3 : 1, 'see-also', s2.cat === 'you' ? 'about you' : b.cats.find(c => c.id === s2.cat)?.name || '');
+      });
+      out.brains.push({ id: b.id, title: brainLabel(b), short: b.name || 'Me', color: b.color, href: '#', self: ml(b.id, 'you'), center: mp(b.id, 'me') });
+      out.centers.push(mp(b.id, 'me'));
     });
-    const sources = brain.entries.filter(e => isFile(e) && e.sub).map(e => ({ id: 'file:' + e.id, label: e.fileName, kind: isImage(e) ? 'image' : 'file', pages: [e.sub] }));
-    const links = subs.filter(s => s.id !== 'me').map(s => ({ s: 'me', t: s.id, w: s.cat === 'you' ? 3 : 1, kinds: ['see-also'], notes: [s.cat === 'you' ? 'about you' : catById(s.cat)?.name || ''] }));
-    Object.entries(linkW).forEach(([key, w]) => { const [a, b] = key.split('|'); const ex = links.find(l => (l.s === a && l.t === b) || (l.s === b && l.t === a)); if (ex) { ex.w += w; ex.kinds.push('mention'); } else links.push({ s: a, t: b, w, kinds: ['mention'], notes: ['mentioned in a synapse'] }); });
-    const used = new Set(subs.map(s => lobeId(s.cat)));
-    return { lobes: brain.cats.filter(c => used.has(lobeId(c.id))).map(c => ({ id: lobeId(c.id), name: c.name, color: c.color, hidden: false })), center: 'me', pages, synapses, sources, links, synLinks, cocite: [], built: today(), demo: false, title: 'MindBlown: Build', subtitle: `${brain.name || 'your'} brain · built by hand` };
+    const ids = new Set(out.pages.map(p => p.id));
+    net.links.forEach(l => { const a = mp(l.a.b, l.a.s), b = mp(l.b.b, l.b.s); if (ids.has(a) && ids.has(b)) pushLink(a, b, l.strength, l.label, l.notes || ''); });
+    const root = net.brains[0];
+    if (multi) Object.assign(out, { brain: 'network', title: `MindBlown: ${root.name ? root.name + "'s" : 'your'} network`, subtitle: `${net.brains.length} brains · ${pw(net.links.length, 'connection')} · built by hand` });
+    else { Object.assign(out, { center: 'me', title: 'MindBlown: Build', subtitle: `${root.name || 'your'} brain · built by hand` }); delete out.brains; delete out.centers; }
+    return out;
   }
   async function openExplorer() {
-    if (brain.subjects.length < 2) { toast('Answer a few questions first, then explode.'); return; }
+    if (net.brains.reduce((n, b) => n + b.subjects.length, 0) < 2) { toast('Answer a few questions first, then explode.'); return; }
     const base = new URL('./', location.href).href;
     const html = await fetch('./index.html').then(r => r.text()).catch(() => null);
     if (!html) { toast('Could not load the explorer.'); return; }
@@ -639,6 +825,11 @@
     brain.subjects.forEach(s => { const t = s.name.toLowerCase(); if (t.includes(term)) hits.push({ kind: 'sub', id: s.id, score: t.startsWith(term) ? 0 : 1, title: s.name, sub: catById(s.cat)?.name, color: catById(s.cat)?.color }); });
     brain.cats.forEach(c => { if (c.name.toLowerCase().includes(term)) hits.push({ kind: 'cat', id: c.id, score: 1.5, title: c.name, sub: 'category', color: c.color }); });
     brain.entries.forEach(e => { const t = (e.text + ' ' + (e.lead || '')).toLowerCase(); if (t.includes(term)) hits.push({ kind: e.sub ? 'sub' : 'cat', id: e.sub || e.cat, score: 3, title: e.text.slice(0, 70), sub: (isFile(e) ? 'file in ' : 'synapse of ') + (e.sub ? subById(e.sub)?.name : catById(e.cat)?.name), color: catById(e.cat)?.color }); });
+    net.links.forEach(l => { if (!endAt(l, brain.id, l.a.s) && !endAt(l, brain.id, l.b.s)) return; const t = (l.label + ' ' + l.notes).toLowerCase(); if (!t.includes(term)) return; const mine = l.a.b === brain.id ? l.a : l.b, other = endOf(mine === l.a ? l.b : l.a).sub; const me = subById(mine.s); if (me) hits.push({ kind: 'sub', id: me.id, score: 2.5, title: `${l.label} → ${other?.name || ''}`, sub: 'connection of ' + me.name, color: catById(me.cat)?.color }); });
+    net.brains.filter(b => b !== brain).forEach(b => {
+      b.subjects.forEach(s => { if (s.name.toLowerCase().includes(term)) hits.push({ kind: 'sub', id: s.id, brain: b.id, score: 4, title: s.name, sub: `in ${brainLabel(b)}`, color: b.color }); });
+      b.entries.forEach(e => { if (!e.sub) return; const t = (e.text + ' ' + (e.lead || '')).toLowerCase(); if (t.includes(term)) hits.push({ kind: 'sub', id: e.sub, brain: b.id, score: 5, title: e.text.slice(0, 70), sub: `${isFile(e) ? 'file' : 'synapse'} of ${b.subjects.find(x => x.id === e.sub)?.name || ''} · in ${brainLabel(b)}`, color: b.color }); });
+    });
     hits.sort((a, b) => a.score - b.score); resultItems = hits.slice(0, 9);
     results.innerHTML = resultItems.length ? resultItems.map(h => `<li role="option"><span class="sw" style="background:${h.color}"></span><span><span class="rt">${esc(h.title)}</span><span class="rs">${esc(h.sub)}</span></span></li>`).join('') : `<li><span class="empty">Nothing fires for “${esc(q.value)}”</span></li>`;
     results.hidden = false; activeIdx = -1;
@@ -646,9 +837,9 @@
   });
   q.addEventListener('keydown', e => { if (results.hidden) return; if (e.key === 'ArrowDown') { activeIdx = Math.min(activeIdx + 1, resultItems.length - 1); mark(); e.preventDefault(); } else if (e.key === 'ArrowUp') { activeIdx = Math.max(activeIdx - 1, 0); mark(); e.preventDefault(); } else if (e.key === 'Enter') choose(Math.max(activeIdx, 0)); });
   function mark() { results.querySelectorAll('li').forEach((li, i) => li.classList.toggle('active', i === activeIdx)); }
-  function choose(i) { const h = resultItems[i]; if (!h) return; hideResults(); q.blur(); h.kind === 'sub' ? selectSub(h.id) : selectCat(h.id); }
+  function choose(i) { const h = resultItems[i]; if (!h) return; hideResults(); q.blur(); if (h.brain && h.brain !== brain.id) { switchBrain(h.brain); setTimeout(() => selectSub(h.id), 60); return; } h.kind === 'sub' ? selectSub(h.id) : selectCat(h.id); }
   document.addEventListener('click', e => { if (!e.target.closest('.search')) hideResults(); });
-  window.addEventListener('keydown', e => { if (e.key === 'Escape') { if (!dlg.hidden) dlgClose(null); else if (!lb.hidden) lb.click(); else if (!qmodal.hidden) closeModal(); else if (!$('explorer').hidden) $('explorer-close').click(); else { clearSelection(); hideResults(); } } });
+  window.addEventListener('keydown', e => { if (e.key === 'Escape') { if (!dlg.hidden) dlgClose(null); else if (!lb.hidden) lb.click(); else if (!qmodal.hidden) closeModal(); else if (!$('explorer').hidden) $('explorer-close').click(); else if (graph.linkFrom) { graph.linkFrom = null; toast('Connection cancelled.'); } else { clearSelection(); hideResults(); } } });
 
   // ---------- the living brain (canvas) ----------
   const graph = (() => {
@@ -657,7 +848,9 @@
     let nodes = [], subNodes = [], synNodes = [], links = [], anchor = {}, R = 420;
     let explodeF = 0, explodeTarget = 0;
     const births = new Map();
-    const api = { forceExplode: false, selected: null, hover: null };
+    const api = { forceExplode: false, selected: null, hover: null, linkFrom: null };   // linkFrom: neuron id while the user is picking a connection target on the canvas
+    let pointerW = null;   // world position of the pointer, for the rubber-band line while linking
+    let userLinks = [];    // the user's connections inside this brain, as sim links
     const byId = new Map();
     const colorCache = {};
     const rgba = (hex, a) => { const key = hex + a; if (colorCache[key]) return colorCache[key]; const c = d3.color(hex) || d3.color('#999'); c.opacity = a; return (colorCache[key] = c.formatRgb()); };
@@ -674,8 +867,8 @@
     const sw = px => px / k;
 
     // forces
-    const linkDist = l => l.kind === 'st' ? 4 + explodeF * orbitR(l.target) : 60;
-    const linkStrength = l => l.kind === 'st' ? 0.15 : 0.05;
+    const linkDist = l => l.kind === 'st' ? 4 + explodeF * orbitR(l.target) : l.kind === 'uu' ? 150 + explodeF * (orbitR(l.source) + orbitR(l.target)) * 0.6 : 60;
+    const linkStrength = l => l.kind === 'st' ? 0.15 : l.kind === 'uu' ? 0.02 * l.ref.strength : 0.05;
     const charge = n => n.kind === 'sub' ? (n.id === 'me' ? -900 : -260 - n.nSyn * 8) : 0;
     const pageCharge = d3.forceManyBody().strength(charge).theta(0.9).distanceMax(700);
     const chargeForce = Object.assign(a => pageCharge(a), { initialize: (ns, rnd) => pageCharge.initialize(ns.filter(n => n.kind === 'sub'), rnd), strength: f => (pageCharge.strength(f), chargeForce) });
@@ -725,6 +918,9 @@
       subNodes.forEach(p => { entriesOf(p.id).forEach((e, i) => { const o = prev.get(e.id); const n = o || { id: e.id, kind: 'syn', x: p.x + (Math.random() - 0.5) * 4, y: p.y + (Math.random() - 0.5) * 4 }; Object.assign(n, { ref: e, cat: e.cat, parent: p, ordinal: i, file: isFile(e), label: isFile(e) ? e.fileName : e.text }); byId.set(n.id, n); synNodes.push(n); }); });
       nodes = [...subNodes, ...synNodes];
       links = synNodes.map(s => ({ source: s, target: s.parent, kind: 'st' }));
+      userLinks = localLinks().map(l => ({ source: byId.get(l.a.s), target: byId.get(l.b.s), kind: 'uu', ref: l })).filter(l => l.source && l.target);
+      links.push(...userLinks);
+      subNodes.forEach(n => { n.far = linksOf(n.id).some(l => otherEnd(l, n.id).b !== brain.id); n.brainId = n.ref.brainId && brainById(n.ref.brainId) ? n.ref.brainId : null; });
       sim.nodes(nodes); sim.force('link').links(links); refreshForces();
       if (warm) { sim.alpha(1); for (let i = 0; i < 200; i++) sim.tick(); }
       sim.alpha(warm ? 0.3 : 0.5).restart();
@@ -768,6 +964,9 @@
 
     // pulses
     const pulses = []; let lastPulse = 0;
+    // user connections are drawn as a quadratic curve bowing to one side; pulses ride the same curve
+    const curveCtl = (a, b) => { const dx = b.x - a.x, dy = b.y - a.y, dl = Math.hypot(dx, dy) || 1, bend = Math.min(60, dl * 0.18); return [(a.x + b.x) / 2 - dy / dl * bend, (a.y + b.y) / 2 + dx / dl * bend]; };
+    const s0 = l => l.source, s1 = l => l.target;
     function spawnPulse(l, fast) { if (!l || pulses.length > 40) return; pulses.push({ l, t: 0, speed: (fast ? 0.03 : 0.01) + Math.random() * 0.006 }); }
 
     // pointer
@@ -785,15 +984,18 @@
       canvas.classList.remove('grabbing');
       if (!downAt || Math.hypot(e.clientX - downAt[0], e.clientY - downAt[1]) > 5) return;
       const n = pick(e.clientX, e.clientY);
+      if (api.linkFrom) { const from = api.linkFrom; api.linkFrom = null; const to = n && (n.kind === 'sub' ? n : n.kind === 'syn' ? n.parent : null); if (to && to.id !== from) linkPicked(from, to.id); else toast('Connection cancelled.'); return; }
       if (!n) { clearSelection(); return; }
       if (n.kind === 'halo') selectCat(n.cat); else if (n.kind === 'sub') selectSub(n.id); else selectSub(n.parent.id, true);
     });
+    canvas.addEventListener('dblclick', e => { const n = pick(e.clientX, e.clientY); if (n && n.kind === 'sub' && n.brainId) switchBrain(n.brainId); });
     canvas.addEventListener('pointermove', e => {
-      const n = pick(e.clientX, e.clientY); api.hover = n && n.kind !== 'halo' ? n : null; canvas.classList.toggle('pointer', !!n);
-      if (n) { tip.hidden = false; tip.style.left = e.clientX + 'px'; tip.style.top = e.clientY + 'px'; tip.innerHTML = n.kind === 'halo' ? `<span class="k">category</span><b>${esc(catById(n.cat)?.name)}</b>${n.count ? pw(n.count, 'neuron') : 'empty · click to add or answer'}` : n.kind === 'sub' ? `<span class="k">${n.id === 'me' ? 'you' : 'neuron'} · ${esc(catById(n.cat)?.name)}</span><b>${esc(n.name)}</b>${pw(n.nSyn, 'synapse')}${n.starred ? ' · ★' : ''}` : `<span class="k">${n.file ? 'file' : 'synapse'} of ${esc(n.parent.name)}</span><b>${esc(n.ref.lead || n.ref.kind)}</b>${esc(n.label.slice(0, 140))}`; }
+      pointerW = toWorld(e.clientX, e.clientY);
+      const n = pick(e.clientX, e.clientY); api.hover = n && n.kind !== 'halo' ? n : null; canvas.classList.toggle('pointer', !!n); canvas.classList.toggle('linking', !!api.linkFrom);
+      if (n) { tip.hidden = false; tip.style.left = e.clientX + 'px'; tip.style.top = e.clientY + 'px'; tip.innerHTML = n.kind === 'halo' ? `<span class="k">category</span><b>${esc(catById(n.cat)?.name)}</b>${n.count ? pw(n.count, 'neuron') : 'empty · click to add or answer'}` : n.kind === 'sub' ? `<span class="k">${n.id === 'me' ? 'centre' : 'neuron'} · ${esc(catById(n.cat)?.name)}</span><b>${esc(n.name)}</b>${pw(n.nSyn, 'synapse')}${linksOf(n.id).length ? ' · ' + pw(linksOf(n.id).length, 'connection') : ''}${n.starred ? ' · ★' : ''}${n.brainId ? '<br>has a brain of its own · double-click to open' : n.id === 'me' && brain.origin ? `<br>grown from ${esc(brainLabel(brainById(brain.origin.brain)) )}` : ''}` : `<span class="k">${n.file ? 'file' : 'synapse'} of ${esc(n.parent.name)}</span><b>${esc(n.ref.lead || n.ref.kind)}</b>${esc(n.label.slice(0, 140))}`; }
       else tip.hidden = true;
     });
-    canvas.addEventListener('pointerleave', () => { api.hover = null; tip.hidden = true; });
+    canvas.addEventListener('pointerleave', () => { api.hover = null; tip.hidden = true; pointerW = null; });
 
     // level pill + zoom buttons
     const levelText = $('level-text'), levelDot = $('level').querySelector('.dot'), hint = $('hint');
@@ -872,6 +1074,26 @@
         ctx.strokeStyle = rgba(colorOf(n), (related ? 0.16 : 0.03) * (n.cat === 'you' ? 2 : 1)); ctx.lineWidth = sw(0.7);
         ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(n.x, n.y); ctx.stroke();
       });
+      // the user's connections: curved, coloured by their ends, labelled when the neuron is in focus
+      const linkLabelVis = clamp01((k - 0.5) / 0.4);
+      userLinks.forEach(l => {
+        const a = l.source, b = l.target; if (!inView(a.x, a.y) && !inView(b.x, b.y)) return;
+        const related = !focusSet || (focusSet.has(a) && focusSet.has(b));
+        const dx = b.x - a.x, dy = b.y - a.y, [cx, cy] = curveCtl(a, b);
+        const g = ctx.createLinearGradient(a.x, a.y, b.x, b.y); g.addColorStop(0, rgba(colorOf(a), related ? 0.75 : 0.08)); g.addColorStop(1, rgba(colorOf(b), related ? 0.75 : 0.08));
+        ctx.strokeStyle = g; ctx.lineWidth = sw(0.6 + 0.7 * l.ref.strength); ctx.setLineDash(l.ref.strength === 1 ? [sw(4), sw(4)] : []);
+        ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.quadraticCurveTo(cx, cy, b.x, b.y); ctx.stroke(); ctx.setLineDash([]);
+        if (related && focusSet && linkLabelVis > 0.02) {
+          const px = 0.25 * a.x + 0.5 * cx + 0.25 * b.x, py = 0.25 * a.y + 0.5 * cy + 0.25 * b.y;
+          let ang = Math.atan2(dy, dx); if (Math.cos(ang) < 0) ang += Math.PI;
+          ctx.save(); ctx.translate(px, py); ctx.rotate(ang); ctx.font = `500 ${sw(11)}px 'Satoshi', sans-serif`; ctx.textAlign = 'center'; ctx.textBaseline = 'bottom';
+          const lab = l.ref.label.length > 32 ? l.ref.label.slice(0, 30) + '…' : l.ref.label;
+          ctx.fillStyle = rgba('#000000', 0.5 * linkLabelVis); ctx.fillText(lab, sw(0.8), -sw(3) + sw(0.8));
+          ctx.fillStyle = rgba('#f1f4ff', 0.92 * linkLabelVis); ctx.fillText(lab, 0, -sw(3)); ctx.restore();
+        }
+      });
+      // rubber band while picking a connection target
+      if (api.linkFrom && pointerW) { const a = byId.get(api.linkFrom); if (a) { ctx.strokeStyle = rgba('#ffffff', 0.7); ctx.lineWidth = sw(1.2); ctx.setLineDash([sw(5), sw(4)]); ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(pointerW[0], pointerW[1]); ctx.stroke(); ctx.setLineDash([]); } }
       // synapse tethers
       if (synVis > 0.02 && explodeF > 0.05) {
         const v = synVis * explodeF;
@@ -879,11 +1101,12 @@
       }
       // pulses along the spokes
       if (!reduceMotion && subNodes.length > 1) {
-        if (now - lastPulse > 420) { lastPulse = now; const n = subNodes[1 + Math.floor(Math.random() * (subNodes.length - 1))]; spawnPulse({ source: byId.get('me'), target: n }); }
+        if (now - lastPulse > 420) { lastPulse = now; if (userLinks.length && Math.random() < 0.35) { const l = userLinks[Math.floor(Math.random() * userLinks.length)]; spawnPulse(Math.random() < 0.5 ? l : { source: l.target, target: l.source, kind: 'uu', rev: l }); } else { const n = subNodes[1 + Math.floor(Math.random() * (subNodes.length - 1))]; spawnPulse({ source: byId.get('me'), target: n }); } }
         for (let i = pulses.length - 1; i >= 0; i--) {
           const p = pulses[i]; p.t += p.speed; if (p.t >= 1) { pulses.splice(i, 1); continue; }
           const s = p.l.source, e = p.l.target; if (!s || !e) { pulses.splice(i, 1); continue; }
-          const x = s.x + (e.x - s.x) * p.t, y = s.y + (e.y - s.y) * p.t, a = Math.sin(p.t * Math.PI) * (focusSet ? 0.5 : 1);
+          let x = s.x + (e.x - s.x) * p.t, y = s.y + (e.y - s.y) * p.t; const a = Math.sin(p.t * Math.PI) * (focusSet ? 0.5 : 1);
+          if (p.l.kind === 'uu') { const L = p.l.rev || p.l, [cx, cy] = curveCtl(s0(L), s1(L)); const t = p.l.rev ? 1 - p.t : p.t, u = 1 - t; x = u * u * s0(L).x + 2 * u * t * cx + t * t * s1(L).x; y = u * u * s0(L).y + 2 * u * t * cy + t * t * s1(L).y; }
           ctx.fillStyle = rgba(colorOf(e), 0.9 * a); ctx.beginPath(); ctx.arc(x, y, sw(2.2), 0, Math.PI * 2); ctx.fill();
           ctx.fillStyle = rgba(colorOf(e), 0.25 * a); ctx.beginPath(); ctx.arc(x, y, sw(6), 0, Math.PI * 2); ctx.fill();
         }
@@ -919,6 +1142,8 @@
         ctx.fillStyle = rgba(col, 0.95 * a); ctx.beginPath(); ctx.arc(n.x, n.y, r, 0, Math.PI * 2); ctx.fill();
         ctx.fillStyle = rgba('#ffffff', 0.55 * a); ctx.beginPath(); ctx.arc(n.x - r * 0.25, n.y - r * 0.25, r * 0.32, 0, Math.PI * 2); ctx.fill();
         if (explodeF < 0.95 && n.nSyn) { ctx.strokeStyle = rgba(col, 0.5 * a * (1 - explodeF)); ctx.lineWidth = sw(1); ctx.setLineDash([sw(1.5), sw(Math.max(2, 40 / n.nSyn))]); ctx.beginPath(); ctx.arc(n.x, n.y, r + sw(5), 0, Math.PI * 2); ctx.stroke(); ctx.setLineDash([]); }
+        // a neuron with a brain of its own, or with connections into another brain, wears a thin dashed ring (the network mark)
+        if (n.brainId || n.far) { ctx.strokeStyle = rgba('#ffffff', (n.brainId ? 0.85 : 0.5) * a); ctx.lineWidth = sw(n.brainId ? 1.3 : 0.9); ctx.setLineDash([sw(3), sw(3)]); ctx.beginPath(); ctx.arc(n.x, n.y, r + sw(n.brainId ? 13 : 11), 0, Math.PI * 2); ctx.stroke(); ctx.setLineDash([]); }
         if (n.starred) { ctx.fillStyle = rgba('#ffd166', 0.95 * a); ctx.font = `${sw(9)}px sans-serif`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText('★', n.x + r + sw(5), n.y - r - sw(3)); }
         if (n === api.selected) { ctx.strokeStyle = rgba('#ffffff', 0.9); ctx.lineWidth = sw(1.6); ctx.beginPath(); ctx.arc(n.x, n.y, r + sw(9), 0, Math.PI * 2); ctx.stroke(); }
         else if (n === api.hover) { ctx.strokeStyle = rgba('#ffffff', 0.6); ctx.lineWidth = sw(1.2); ctx.beginPath(); ctx.arc(n.x, n.y, r + sw(7), 0, Math.PI * 2); ctx.stroke(); }
@@ -929,6 +1154,7 @@
           const label = me ? (brain.name || 'You') : n.name;
           ctx.fillStyle = rgba('#000000', 0.55 * lv * a); ctx.fillText(label, n.x + sw(0.8), n.y + r + sw(5.8));
           ctx.fillStyle = rgba(related ? '#f1f4ff' : '#9aa5c2', (related ? 0.95 : 0.5) * lv); ctx.fillText(label, n.x, n.y + r + sw(5));
+          if (n.brainId && k > 0.45) { ctx.font = `500 ${sw(9.5)}px 'Satoshi', sans-serif`; ctx.fillStyle = rgba('#a7b2cc', 0.85 * lv); ctx.fillText('own brain ↗', n.x, n.y + r + sw(5) + sw(me ? 18 : 15)); }
         }
       });
       // an empty brain still shows where you are
@@ -940,7 +1166,7 @@
     }
     function neighborhood(n) {
       const set = new Set([n]);
-      if (n.kind === 'sub') { synNodes.forEach(s => { if (s.parent === n) set.add(s); }); if (n.id !== 'me') set.add(byId.get('me')); else subNodes.forEach(s => set.add(s)); }
+      if (n.kind === 'sub') { synNodes.forEach(s => { if (s.parent === n) set.add(s); }); userLinks.forEach(l => { if (l.source === n) set.add(l.target); if (l.target === n) set.add(l.source); }); if (n.id !== 'me') set.add(byId.get('me')); else subNodes.forEach(s => set.add(s)); }
       else if (n.kind === 'syn') { set.add(n.parent); synNodes.forEach(s => { if (s.parent === n.parent) set.add(s); }); }
       return set;
     }
@@ -953,9 +1179,9 @@
   (async () => {
     await store.open();
     const saved = await store.loadBrain();
-    brain = saved ? sanitizeBrain({ ...emptyBrain(), ...saved }) : emptyBrain();
+    net = saved && typeof saved === 'object' ? sanitizeNet(saved) : emptyNet(); brain = brainById(net.active);
     if (!saved) await save(true);
-    updateStore(); renderCats(); graph.start();
+    updateStore(); renderCats(); renderBrainSwitch(); graph.start();
     iv.classList.toggle('paused', brain.paused); $('iv-pause').textContent = brain.paused ? 'Resume' : 'Pause';
     if (saved && brain.name) advance(`Welcome back, ${brain.name}.`); else advance();
     document.fonts?.ready.then(() => $('loading').classList.add('done'));
