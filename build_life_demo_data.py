@@ -127,7 +127,7 @@ page('family/coparenting-schedule', 'Co-parenting schedule', 'habit', 'family',
      'Alternating weeks with Sunday handovers, holidays split by odd and even years, and a birthday rule — all encoded as calendar events.',
      [
       ('Alternating weeks', 'Handover Sunday 17:00; events recur for the whole school year.', [CAL('Week swap – Juno to Dana', '2026-11-08')], ['people/dana-okafor']),
-      ('Holidays by year parity', 'Even years: Dana has the first half of the summer break; odd years the reverse. A January 1 "rotation check" event keeps it honest.', [CAL('Holiday rotation check', '2027-01-01'), WIKI('projects/coparenting-agreement', 'Co-parenting agreement')]),
+      ('Holidays by year parity', 'Even years: Dana has the first half of the summer break; odd years the reverse. A January 3 "summer-half swap" reminder keeps it honest.', [CAL('Summer-half swap reminder', '2027-01-03'), WIKI('projects/coparenting-agreement', 'Co-parenting agreement')]),
       ('Birthday rule', 'Regular week holds on Juno\'s birthday, with two hours for the other parent.', [CAL("Juno's birthday", '2027-03-03')], ['people/juno']),
       ('Agreement finalised 2025', 'Mediated and signed in 2025; the Brain keeps a summary, not the document.', [WIKI('projects/coparenting-agreement', 'Co-parenting agreement')]),
      ], see=['people/juno', 'people/dana-okafor'])
@@ -145,8 +145,8 @@ page('people/marguerite-vale', 'Marguerite Vale', 'person', 'family',
 page('people/family-circle', 'Family circle', 'person', 'family', 'The recurring people-dates on the calendar beyond the household.',
      [
       ('Tomasz and Hana', 'Sam\'s uncle Tomasz (birthday Oct 2) and aunt Hana (Jun 26).', [CAL('Tomasz bday', '2026-10-02'), CAL('Hana bday', '2026-06-26')]),
-      ('Parents\' anniversary', 'July 18.', [CAL('Parents anniversary', '2026-07-18')], ['people/marguerite-vale']),
-      ('Cousin Ines', 'Birthday September 1; a "Hiya!" from Sam the day after Halloween.', [CAL('Ines bday', '2026-09-01'), GM('Hiya!', '2026-11-01')]),
+      ('Parents\' anniversary', 'July 18.', [CAL('Marguerite & Theo anniversary', '2026-07-18')], ['people/marguerite-vale']),
+      ('Cousin Ines', 'Birthday September 1; a "Hello from the island!" from Sam the day after Halloween.', [CAL('Ines bday', '2026-09-01'), GM('Hello from the island!', '2026-11-01')]),
      ], see=['people/marguerite-vale', 'family/birthdays'])
 
 page('family/birthdays', 'Birthdays & anniversaries', 'habit', 'family', 'The people-dates in calendar order.',
@@ -301,9 +301,9 @@ page('studio/toolchain', 'AI & dev toolchain', 'habit', 'studio', 'The stack ass
 
 page('studio/media', 'Video, images & art', 'habit', 'studio', 'A YouTube channel for the studio, a chess-battle video idea and "Bob Ross, but harbours".',
      [
-      ('Channel', 'October 26: how to make a second channel on the same account.', [SES('make a new youtube channel with the same email', '2026-10-26')], ['studio/vale-studio']),
+      ('Channel', 'October 25: how to run a second video channel under the studio login.', [SES('second video channel under the same studio login', '2026-10-25')], ['studio/vale-studio']),
       ('Bob Ross, but harbours', 'October 22.', [SES('if bob ross painted harbours at dusk what would the palette be', '2026-10-22')]),
-      ('Chess battle video', 'September 15: pieces that move on their own.', [SES('chess battle where the pieces move on their own', '2026-09-15')], ['play/chess']),
+      ('Chess battle video', 'September 13: a board where the pieces drift like boats.', [SES('stop-motion chess where the pieces drift like boats', '2026-09-13')], ['play/chess']),
       ('Image tools', 'A lightweight image viewer (Oct 30) and a design-school course (Oct 23).', [SES('lightweight image viewer windows', '2026-10-30'), GM('Get better at design with this course', '2026-10-23')]),
      ], see=['studio/vale-studio'])
 
@@ -314,7 +314,7 @@ page('money/overview', 'Money overview', 'account', 'money', 'The shape of Sam\'
       ('Two tracked debts', 'A Coastline Credit mortgage and a boat loan are tracked manually from payments, not linked.', [M_HOUSE, M_BOAT], ['money/mortgage', 'money/boat-loan']),
       ('Income in two rhythms', 'Per-boat invoices with a spring regatta rush and a quiet winter.', [M_INCOME], ['money/income-model']),
       ('Transfers dominate the ledger', 'Transfers, income and loan payments lead the 2026 category ranking.', [BANK_CAT], ['money/spending-shape']),
-      ('Second aggregator', 'A budgeting app sends periodic "new updates" digests.', [GM('You have 3 new updates', '2026-10-02')], ['money/accounts']),
+      ('Second aggregator', 'A budgeting app sends periodic "new updates" digests.', [GM('Your weekly budget digest is ready', '2026-10-03')], ['money/accounts']),
      ], see=['money/mortgage', 'money/accounts', 'money/spending-shape', 'studio/ledgerline'], created='2026-09-14')
 
 page('money/mortgage', 'Coastline Credit mortgage', 'account', 'money', 'Renewed April 2025 over a 20-year amortization, maturing 2030; a rate-change notice arrived October 31, 2026.',
@@ -397,8 +397,8 @@ page('home/saltmarsh-house', 'The house on Saltmarsh Lane', 'place', 'home', 'A 
 
 page('home/saltmarsh-lane', 'Saltmarsh Lane', 'place', 'home', 'The neighbourhood. Safety posts arrive from "a neighbour near Saltmarsh Lane".',
      [
-      ('Warning posts', 'November 1: "⚠️ Warning –" and "Last night (1–2 people) around 10–11 PM tried…"', [GM('⚠️ Warning –', '2026-11-01'), GM('Last night (1-2 people) around 10-11 PM tried to...', '2026-11-01')]),
-      ('Scam story in July', 'A neighbour\'s scam story, July 16.', [GM('I got scammed and want to warn everyone', '2026-07-16')]),
+      ('Warning posts', 'October 29: "Heads up: dinghy oars taken from the slipway" and "Anyone else hear the alarm at 2 AM?"', [GM('Heads up: dinghy oars taken from the slipway', '2026-10-29'), GM('Anyone else hear the alarm at 2 AM?', '2026-10-29')]),
+      ('Scam story in July', 'A neighbour\'s scam story, July 19.', [GM('Fake mooring-fee invoice doing the rounds', '2026-07-19')]),
       ('Filed under Neighbourhood', 'The mail clean-up labels these Topics/Neighbourhood.', [W_MAIL], ['home/footprint']),
      ], see=['home/saltmarsh-house'])
 
@@ -415,7 +415,7 @@ page('home/pet', 'A pet in the house', 'entity', 'home', 'A pet-supply chain and
 
 page('home/office', 'Home office', 'project', 'home', 'Three completed tasks on November 1: an efficient home office, turning the front room into a studio desk, and fibre plans.',
      [
-      ('Efficient home office', 'Task complete, November 1.', [GM('Your task is complete: Setting up an efficient home office', '2026-11-01')]),
+      ('Efficient home office', 'Task complete, November 1.', [GM('Your plan is ready: a studio corner that doubles as an office', '2026-11-01')]),
       ('Front room as studio', '"Turn the front room into a studio desk".', [GM('Your task is complete: Turn the front room into a studio desk', '2026-11-01')], ['studio/vale-studio']),
       ('Fibre', 'Plans compared.', [GM('Your task is complete: Fibre plans on Saltmarsh Lane', '2026-11-01')], ['home/utilities']),
      ], parent='home/saltmarsh-house', see=['studio/toolchain'], created='2026-11-01')
@@ -437,14 +437,14 @@ page('home/footprint', 'Digital footprint', 'project', 'home', 'An October 18–
 # ================================================================ BODY & MIND
 page('body/fitness', 'Fitness', 'habit', 'body', 'A gym day on the calendar, swim-squad Tuesdays as a family fixture, and a minimum-viable plan that survives refit weeks.',
      [
-      ('Gym, June 16', 'A single "Gym" event two months before the birthday.', [CAL('Gym', '2026-06-16')]),
+      ('Rowing, June 16', 'A single "Rowing machine" event two months before the birthday.', [CAL('Rowing machine', '2026-06-16')]),
       ('Minimum viable plan', 'A floor of cardio and strength with a downgrade mode for refit weeks.', [W_LIFE, LIFE], ['body/road-mode']),
       ('Squad Tuesdays', 'Juno\'s swim squad doubles as Sam\'s lap night.', [CAL('Juno – squad', '2026-10-27')], ['people/juno']),
      ], see=['body/road-mode'])
 
-page('body/dental', 'Dentist', 'habit', 'body', 'Sam\'s own appointment September 17 at 10:30, plus Juno\'s coordination with Dana and a school dental van.',
+page('body/dental', 'Dentist', 'habit', 'body', 'Sam\'s own check September 18 at 09:15, plus Juno\'s coordination with Dana and a school dental van.',
      [
-      ('Sep 17, 10:30', '"Dentist 10:30" on the calendar.', [CAL('Dentist 10:30', '2026-09-17')]),
+      ('Sep 18, 09:15', '"Dental check 09:15" on the calendar.', [CAL('Dental check 09:15', '2026-09-18')]),
       ('Juno\'s dentist', 'Threads with Dana in February, August and October.', [GM('Juno dentist – Thursday?', '2026-08-25', 'Dana')], ['people/juno', 'people/dana-okafor']),
       ('Dental van', 'School notice, October 26.', [GM('Dental van visit', '2026-10-26')], ['family/school']),
       ('Covered', 'Harbour Mutual.', [BANK_MER], ['family/health-fund']),
@@ -472,7 +472,7 @@ page('body/sleep', 'Sleep & calm', 'habit', 'body', 'Lofi and sleep playlists, a
 
 # ================================================================ PLAY
 PLAYLISTS = [("Juno's Boat Songs", 'Whale song, shanties, novelty, two dance hits'), ('Breakwater Lounge', 'Sinatra, Dean Martin, Nat King Cole, Louis Prima'),
-             ('Priya + saltyvale', 'Nine Inch Nails, Sleep Token, CZARFACE'), ('Loud', 'Lamb of God, Slayer, White Zombie'), ('Favourites', 'Devil Makes Three, Hendrix, Colter Wall'),
+             ('Priya + saltyvale', 'Nine Inch Nails, Sleep Token, CZARFACE'), ('Loud', 'Gojira, Mastodon, Baroness'), ('Boat Favourites', 'Devil Makes Three, Hendrix, Colter Wall'),
              ('lofi for the night watch', 'lofi beats'), ('Piano trio, late', 'piano trio jazz'), ('Southern Gothic', 'dark folk and blues'), ('90s Rock Anthems', 'editorial'),
              ('Blues covers (AI)', 'AI-generated soul and blues covers'), ('Tarantino cuts', 'soundtrack picks'), ('Pickin\' on bluegrass', 'bluegrass covers'), ('Women of blues', 'editorial'), ('Sea shanties, loud', 'shanties')]
 page('play/music-library', 'Music library', 'habit', 'play', f'{len(PLAYLISTS)} playlists: lounge, metal, blues and Southern Gothic, lofi, jazz trio, family lists and shared lists with friends.',
@@ -484,9 +484,9 @@ page('play/junos-playlist', "Juno's Boat Songs", 'project', 'play', 'Whale song 
      parent='play/music-library', see=['people/juno'])
 
 page('play/loud', 'Loud', 'habit', 'play', 'Lamb of God, Slayer, White Zombie, Nine Inch Nails and Sleep Token — the loud end of the library.',
-     [('Loud', 'Lamb of God and Slayer; an October 27 lyrics search.', [SP('Loud'), SES('lamb of god omerta lyrics', '2026-10-27')]),
+     [('Loud', 'Gojira and Mastodon; an October 28 lyrics search.', [SP('Loud'), SES('mastodon blood and thunder lyrics meaning', '2026-10-28')]),
       ('Shared with Priya', '"Priya + saltyvale".', [SP('Priya + saltyvale')], ['people/priya-natarajan']),
-      ('Favourites', 'Devil Makes Three, Hendrix, Colter Wall.', [SP('Favourites')])],
+      ('Boat Favourites', 'Devil Makes Three, Hendrix, Colter Wall.', [SP('Boat Favourites')])],
      parent='play/music-library', see=['people/priya-natarajan'])
 
 page('play/gaming', 'Gaming', 'habit', 'play', 'A mobile walking game on the go, a console at home, a handheld case redesign, a family server, and GTA anticipation.',
@@ -501,14 +501,14 @@ page('play/gaming', 'Gaming', 'habit', 'play', 'A mobile walking game on the go,
 page('play/chess', 'Chess', 'habit', 'play', 'School chess-club mail, a junior tournament, and two September sessions.',
      [
       ('School club', 'Term dates and a junior tournament notice.', [GM('Chess club – term 4 dates', '2026-10-14'), GM('Junior tournament – Saturday', '2026-10-28')], ['people/juno']),
-      ('Play the AI', 'September 16: "Can we play you at chess?"', [SES('Can we play you at chess?', '2026-09-16')]),
-      ('Chess battle', 'September 15: pieces that move on their own.', [SES('chess battle where the pieces move on their own', '2026-09-15')], ['studio/media']),
+      ('Play the AI', 'September 17: "Fancy a game of chess against us?"', [SES('Fancy a game of chess against us?', '2026-09-17')]),
+      ('Chess battle', 'September 13: a board where the pieces drift like boats.', [SES('stop-motion chess where the pieces drift like boats', '2026-09-13')], ['studio/media']),
      ], see=['play/gaming', 'people/juno'])
 
 page('play/reading', 'Reading & newsletters', 'habit', 'play', 'A weekly reading digest, two fact newsletters, an e-reader club, a design course.',
      [
       ('Weekly reads', 'Vol. 166 and 167.', [GM('Weekly reads, vol. 166', '2026-10-25'), GM('Weekly reads, vol. 167', '2026-11-01')]),
-      ('Fact newsletters', 'Inventions, earwax, five history films.', [GM('Why cotton swabs make more earwax', '2026-11-02'), GM('5 history films everyone should watch', '2026-11-02')]),
+      ('Fact newsletters', 'Inventions, lighthouse stripes, six sea films.', [GM('Why lighthouses were painted in stripes', '2026-10-31'), GM('Six sea films worth a rainy Sunday', '2026-10-31')]),
       ('Filed under Newsletters', 'Topics/Newsletters.', [W_MAIL], ['home/footprint']),
      ], see=['money/subscriptions'])
 
@@ -523,7 +523,7 @@ page('play/travel', 'Travel for its own sake', 'trip', 'play', 'A spa inn in Nov
      [
       ('Lakeside inn', 'November 8–10, 2025.', [CAL('Stay at Lakeside Inn', '2025-11-08')], ['work/travel-2026']),
       ('Halvern', 'A trade-show trip and "biggest grape in Halvern" on the way home.', [CAL('Halvern Marine Expo', '2026-09-22'), SES('biggest grape in Halvern', '2026-09-25')]),
-      ('Cruise mail', 'Promotions, November 2.', [GM('Low deposits + big perks', '2026-11-02')]),
+      ('Cruise mail', 'Promotions, November 2.', [GM('Open a second account, get a tote bag', '2026-11-02')]),
       ('Hotels and ferries', 'Among merchants; travel is its own category.', [BANK_MER, BANK_CAT], ['money/spending-shape']),
      ], see=['work/travel-2026'])
 
@@ -544,8 +544,8 @@ page('preferences/privacy-boundaries', 'Keeps private things private', 'preferen
 # ================================================================ TRAIL
 TRAIL = {
     '2026-09-14': ['tide times Port Ellery', 'Can you help me get my life in order? Money, Juno, the boat, the studio'],
-    '2026-09-15': ['chess battle where the pieces move on their own'],
-    '2026-09-16': ['Can we play you at chess?', 'resize handheld case design to match pc case'],
+    '2026-09-13': ['stop-motion chess where the pieces drift like boats'],
+    '2026-09-17': ['Fancy a game of chess against us?', 'resize handheld case design to match pc case'],
     '2026-09-20': ['9 inch chartplotter comparison 2026'], '2026-09-21': ['which plotters read vector charts offline'],
     '2026-09-25': ['biggest grape in Halvern'], '2026-09-28': ['class b+ ais transponder splitter', 'ais silent mode legality'],
     '2026-09-29': ['donation link for a free game'], '2026-10-01': ['nmea 2000 backbone max length'], '2026-10-02': ['ultrasonic wind sensor vs cups small boat'],
@@ -553,8 +553,8 @@ TRAIL = {
     '2026-10-06': ['text to speech for a picture book read-along', 'wind sensor dropping off nmea bus'], '2026-10-07': ['best places to show a beta app'],
     '2026-10-08': ['Can my mum have her own cabin save on the family server?'], '2026-10-12': ['how to lay a fire that lights first time'], '2026-10-13': ['what is the wavy air above a fire called'],
     '2026-10-18': ['What is public about me online? Handles, old forum posts, race results'], '2026-10-19': ['small presses accepting illustrated picture book submissions'],
-    '2026-10-20': ['can you clean up my mail?'], '2026-10-22': ['if bob ross painted harbours at dusk what would the palette be'], '2026-10-26': ['make a new youtube channel with the same email'],
-    '2026-10-27': ['lamb of god omerta lyrics', 'coding assistant lost the repo context again'], '2026-10-30': ['lightweight image viewer windows'],
+    '2026-10-20': ['can you clean up my mail?'], '2026-10-22': ['if bob ross painted harbours at dusk what would the palette be'], '2026-10-25': ['second video channel under the same studio login'],
+    '2026-10-28': ['mastodon blood and thunder lyrics meaning', 'coding assistant lost the repo context again'], '2026-10-30': ['lightweight image viewer windows'],
     '2026-11-01': ['Assume the role of my head of marketing for Tidewatch and Hollow Pines'],
 }
 # map trail titles to existing session sources by label prefix
@@ -562,7 +562,7 @@ by_label = {m['label']: u for u, m in SOURCES.items() if m['kind'] == 'session'}
 KEYMAP = [('chartplotter|plotters|ais|nmea|wind sensor', 'work/gear-research'), ('coding assistant|review bot|payments|logo|text to speech', 'studio/toolchain'),
           ('fire|bob ross', 'play/fire-and-sky'), ('chess', 'play/chess'), ('handheld|cabin save', 'play/gaming'), ('public about me|clean up my mail', 'home/footprint'),
           ('life in order|tide times', 'money/overview'), ('presses', 'studio/paper-moons'), ('youtube|image viewer', 'studio/media'), ('beta app|head of marketing|donation', 'studio/vale-studio'),
-          ('omerta', 'play/loud'), ('grape', 'play/travel')]
+          ('blood and thunder', 'play/loud'), ('grape', 'play/travel')]
 import re
 for d, titles in sorted(TRAIL.items()):
     syns = []
