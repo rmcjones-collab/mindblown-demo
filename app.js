@@ -567,7 +567,9 @@
     panelBody.querySelectorAll('.syn').forEach(el => el.addEventListener('click', () => {
       const s = synById[el.dataset.id]; if (!s) return;
       panelBody.querySelectorAll('.syn').forEach(x => x.classList.remove('active')); el.classList.add('active');
-      pulseSyn = s; zoomTo(s, Math.max(k, 3.4), 800);
+      ensureVisible(s); pulseSyn = s; zoomTo(s, Math.max(k, 3.4), 800);
+      // same folded-child recentering as select(): the synapse moves while its sub-neuron unfolds
+      if (isChild(pageById[s.page]) && depthF < 0.97) setTimeout(() => { if (pulseSyn === s) zoomTo(s, Math.max(k, 3.4), 700); }, 900);
     }));
     panel.scrollTop = 0;
   }
