@@ -6,7 +6,12 @@ MindBlown turns a Perplexity Brain (the `memory/knowledge` wiki) into a zoomable
 - **Neurons** — one node per wiki page, sized by how many notes it holds.
 - **Synapses** — every `- **Lead** — text` bullet becomes its own particle orbiting its neuron; zoom in (or flip "Explode every neuron") to read them, follow `[[wikilinks]]` between pages, and trace `[cite:n]` sources back to sessions, GitHub PRs and web pages.
 
-**This public repository ships a fully fictional demo brain** ("Sam Vale" and friends). No real people, projects or sessions appear in `data.js`.
+**This public repository ships two fully fictional demo brains** for "Sam Vale":
+
+- `index.html` + `data.js` — the **Projects** brain (a Perplexity Brain wiki exploded into lobes, neurons and synapses).
+- `life.html` + `life-data.js` — the **Life** brain: lobes are life domains (family, crew, work, studio, money, home, body, play), neurons are people, places, habits, events and accounts, and neurons can go **one level deeper** into sub-neurons that unfold as you zoom. Synapses cite fictional mail metadata, calendar entries, playlists, bank *category names*, memory notes and Brain pages.
+
+No real people, projects, sessions or messages appear in either data file. A header switch links the two pages.
 
 Live demo: see the published pplx.app link in the repository description.
 
@@ -22,7 +27,8 @@ It is a static site: `index.html`, `style.css`, `app.js` (D3 v7, canvas) and `da
 ## Regenerate the demo data
 
 ```bash
-python3 build_demo_data.py      # rewrites data.js with the fictional brain
+python3 build_demo_data.py       # rewrites data.js (Projects brain)
+python3 build_life_demo_data.py  # rewrites life-data.js (Life brain)
 ```
 
 ## Point it at your own Brain
@@ -48,3 +54,7 @@ links[]     {s, t, w, kinds[], notes[]}      page ↔ page
 synLinks[]  {s, t}                           synapse → page
 cocite[]    {s, t, w}                        pages sharing a source
 ```
+
+## Depth: sub-neurons
+
+Give any page a `"parent": "<page id>"` and it becomes a sub-neuron: folded into its parent at lobe zoom, unfolding onto a ring around it past 0.85×, exploding into its own synapses past 1.5×. The side panel lists `Sub-neurons` on the parent and `Part of` on the child.
