@@ -176,9 +176,10 @@
     const vp = pages.filter(p => visible(p) && !isChild(p));
     const xs = vp.map(p => p.x), ys = vp.map(p => p.y);
     const minX = Math.min(...xs) - 150, maxX = Math.max(...xs) + 150, minY = Math.min(...ys) - 170, maxY = Math.max(...ys) + 170;
-    const kk = Math.min((W - 60) / (maxX - minX), (H - 200) / (maxY - minY)) * 0.96;
+    const padL = window.innerWidth <= 900 ? 0 : 230; // keep the fitted brain clear of the lobes legend on desktop
+    const kk = Math.min((W - 60 - padL) / (maxX - minX), (H - 200) / (maxY - minY)) * 0.96;
     const cx = (minX + maxX) / 2, cy = (minY + maxY) / 2;
-    const t = d3.zoomIdentity.translate(W / 2 - cx * kk, H / 2 + 12 - cy * kk).scale(kk);
+    const t = d3.zoomIdentity.translate(padL + (W - padL) / 2 - cx * kk, H / 2 + 12 - cy * kk).scale(kk);
     d3.select(canvas).transition().duration(dur).ease(d3.easeCubicInOut).call(zoom.transform, t);
   }
   function zoomTo(n, kk, dur = 1100) {
@@ -654,10 +655,11 @@
     const vp = pages.filter(p => visible(p) && !isChild(p));
     const xs = vp.map(p => p.x), ys = vp.map(p => p.y);
     const minX = Math.min(...xs) - 150, maxX = Math.max(...xs) + 150, minY = Math.min(...ys) - 170, maxY = Math.max(...ys) + 170;
-    const kk = Math.min((W - 60) / (maxX - minX), (H - 200) / (maxY - minY)) * 0.96;
-    const t = d3.zoomIdentity.translate(W / 2 - (minX + maxX) / 2 * kk, H / 2 + 12 - (minY + maxY) / 2 * kk).scale(kk * 0.6);
-    d3.select(canvas).call(zoom.transform, t);
-    d3.select(canvas).transition().duration(1600).ease(d3.easeCubicOut).call(zoom.transform, d3.zoomIdentity.translate(W / 2 - (minX + maxX) / 2 * kk, H / 2 + 12 - (minY + maxY) / 2 * kk).scale(kk));
+    const padL = window.innerWidth <= 900 ? 0 : 230;
+    const kk = Math.min((W - 60 - padL) / (maxX - minX), (H - 200) / (maxY - minY)) * 0.96;
+    const tx = padL + (W - padL) / 2 - (minX + maxX) / 2 * kk, ty = H / 2 + 12 - (minY + maxY) / 2 * kk;
+    d3.select(canvas).call(zoom.transform, d3.zoomIdentity.translate(tx, ty).scale(kk * 0.6));
+    d3.select(canvas).transition().duration(1600).ease(d3.easeCubicOut).call(zoom.transform, d3.zoomIdentity.translate(tx, ty).scale(kk));
   })();
   updateLevel();
   requestAnimationFrame(draw);
