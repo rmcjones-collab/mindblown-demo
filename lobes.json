@@ -1,0 +1,12 @@
+{
+  "center": "entities/your-name",
+  "default": "misc",
+  "lobes": [
+    {"id": "alpha", "name": "Project Alpha", "color": "#4fd1c5", "match": ["alpha-", "project-alpha"]},
+    {"id": "beta", "name": "Project Beta", "color": "#ff8a3d", "match": ["beta-"]},
+    {"id": "misc", "name": "Everything else", "color": "#60a5fa", "match": []},
+    {"id": "pref", "name": "Preferences", "color": "#a3e635", "match": ["preferences/"]},
+    {"id": "dream", "name": "Dream log", "color": "#94a3b8", "match": ["learnings/", "artifacts/"], "hidden": true},
+    {"id": "self", "name": "You", "color": "#fde68a", "match": ["entities/your-name"]}
+  ]
+}
