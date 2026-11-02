@@ -51,7 +51,17 @@
     return {
       open, get mode() { return mode; },
       async loadBrain() { if (!db) return mem.brain; try { return await tx('kv', 'readonly', s => s.get('brain')); } catch { return null; } },
-      async saveBrain(b) { if (!db) { mem.brain = b; return; } try { await tx('kv', 'readwrite', s => s.put(b, 'brain')); } catch (e) { console.warn('save failed', e); } },
+      async saveBrain(b) { if (!db) { mem.brain = b; return true; } try { await tx('kv', 'readwrite', s => s.put(b, 'brain')); return true; } catch (e) { console.warn('save failed', e); return false; } },
+      // swap the whole brain and its files in one transaction: either everything lands or nothing changes
+      async replaceAll(b, files) {
+        if (!db) { mem.brain = b; mem.files = new Map(files.map(f => [f.id, f.blob])); return; }
+        await new Promise((res, rej) => {
+          const t = db.transaction(['kv', 'files'], 'readwrite');
+          const kv = t.objectStore('kv'), fs = t.objectStore('files');
+          kv.clear(); fs.clear(); kv.put(b, 'brain'); files.forEach(f => fs.put(f.blob, f.id));
+          t.oncomplete = () => res(); t.onerror = () => rej(t.error); t.onabort = () => rej(t.error || new Error('aborted'));
+        });
+      },
       async putFile(id, blob) { if (!db) { mem.files.set(id, blob); return; } await tx('files', 'readwrite', s => s.put(blob, id)); },
       async getFile(id) { if (!db) return mem.files.get(id) || null; try { return (await tx('files', 'readonly', s => s.get(id))) || null; } catch { return null; } },
       async delFile(id) { if (!db) { mem.files.delete(id); return; } await tx('files', 'readwrite', s => s.delete(id)); },
@@ -83,17 +93,19 @@
   const isFile = e => e.kind === 'file';
   const isImage = e => /^image\//.test(e.fileType || '');
 
-  let saveT = 0, dirty = false;
+  let saveT = 0, dirty = false, saveGen = 0, saveFailed = false;
   function save(immediate) {
-    brain.updated = today(); dirty = true; updateStore();
+    brain.updated = today(); dirty = true; saveFailed = false; updateStore();
     clearTimeout(saveT);
-    const run = async () => { dirty = false; await store.saveBrain(JSON.parse(JSON.stringify(brain))); updateStore(); };
+    const gen = ++saveGen;
+    const run = async () => { const ok = await store.saveBrain(JSON.parse(JSON.stringify(brain))); if (gen === saveGen) { dirty = !ok; saveFailed = !ok; } updateStore(); };
     if (immediate) return run();
     saveT = setTimeout(run, 400);
   }
   function updateStore() {
     const el = $('store');
-    if (store.mode === 'browser') { el.textContent = dirty ? 'saving…' : 'saved in this browser'; el.classList.remove('warn'); el.title = 'Your brain is stored in this browser only. Use Save to keep a copy as a file.'; }
+    if (store.mode === 'browser' && saveFailed) { el.textContent = 'not saved · use Save'; el.classList.add('warn'); el.title = 'This browser refused to store the last change. Download a copy with Save so nothing is lost.'; }
+    else if (store.mode === 'browser') { el.textContent = dirty ? 'saving…' : 'saved in this browser'; el.classList.remove('warn'); el.title = 'Your brain is stored in this browser only. Use Save to keep a copy as a file.'; }
     else { el.textContent = 'not stored · use Save'; el.classList.add('warn'); el.title = 'This preview cannot store anything between visits. Use Save to download your brain, and Open to continue later.'; }
   }
 
@@ -538,6 +550,7 @@
     const arr = v => Array.isArray(v) ? v.filter(x => x && typeof x === 'object') : [];
     b.name = str(b.name, 80); b.created = safeDate(b.created); b.updated = safeDate(b.updated);
     b.cats = !Array.isArray(b.cats) ? base.cats : arr(b.cats).map(c => ({ id: str(c.id, 60), name: str(c.name, 80) || 'Category', color: safeColor(c.color), enabled: c.enabled !== false, custom: !!c.custom, desc: str(c.desc, 400), icon: str(c.icon, 8) }));
+    if (!b.cats.some(c => c.id !== 'you')) b.cats = base.cats; // nothing usable: restore the default set
     if (!b.cats.some(c => c.id === 'you')) b.cats.unshift(base.cats[0]);
     b.subjects = arr(b.subjects).map(s => ({ id: str(s.id, 60), cat: str(s.cat, 60), name: str(s.name, 120) || 'Neuron', starred: !!s.starred, desc: str(s.desc, 600), created: safeDate(s.created) }));
     if (!b.subjects.some(s => s.id === 'me')) b.subjects.unshift({ ...base.subjects[0], name: b.name || 'Me' });
@@ -574,10 +587,13 @@
     let next; try { next = sanitizeBrain({ ...emptyBrain(), ...doc.brain }); } catch { toast('That brain file is damaged.'); return; }
     const files = (doc.files || []).filter(f => f && typeof f === 'object' && typeof f.id === 'string' && typeof f.data === 'string');
     if (brain.entries.length && !(await confirmDlg('Replace the current brain?', 'The brain in this browser is replaced by the file. Save a copy first if you want to keep it.', 'Replace'))) return;
-    await store.clear(); urlCache.forEach(u => URL.revokeObjectURL(u)); urlCache.clear();
-    brain = next;
-    for (const f of files) { try { const bin = atob(f.data); const arr = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i); await store.putFile(f.id, new Blob([arr], { type: f.type })); } catch { /* skip a broken file */ } }
-    await save(true); clearSelection(); graph.rebuild(true); graph.fit(); renderCats(); iv.classList.toggle('paused', brain.paused); $('iv-pause').textContent = brain.paused ? 'Resume' : 'Pause'; advance(`Welcome back, ${brain.name}.`); toast('Brain loaded.');
+    const blobs = [];
+    for (const f of files) { try { const bin = atob(f.data); const arr = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i); blobs.push({ id: f.id, blob: new Blob([arr], { type: str(f.type, 120) || 'application/octet-stream' }) }); } catch { /* skip a broken file */ } }
+    next.updated = today();
+    try { await store.replaceAll(JSON.parse(JSON.stringify(next)), blobs); }
+    catch (e) { console.warn('import failed', e); toast('Could not store that brain. Nothing was changed.'); return; }
+    urlCache.forEach(u => URL.revokeObjectURL(u)); urlCache.clear();
+    brain = next; dirty = false; saveFailed = false; updateStore(); clearSelection(); graph.rebuild(true); graph.fit(); renderCats(); iv.classList.toggle('paused', brain.paused); $('iv-pause').textContent = brain.paused ? 'Resume' : 'Pause'; advance(`Welcome back, ${brain.name}.`); toast('Brain loaded.');
   }
   $('act-save').addEventListener('click', exportBrain);
   $('act-open').addEventListener('click', () => $('file-open').click());
