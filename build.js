@@ -15,15 +15,15 @@
   let toastT = 0;
   function toast(msg) { toastEl.textContent = msg; toastEl.classList.add('show'); clearTimeout(toastT); toastT = setTimeout(() => toastEl.classList.remove('show'), 2600); }
   const dlg = $('dlg'), dlgTitle = $('dlg-title'), dlgText = $('dlg-text'), dlgInput = $('dlg-input'), dlgOk = $('dlg-ok'), dlgCancel = $('dlg-cancel');
-  let dlgResolve = null;
+  let dlgResolve = null, dlgReturn = null;
   function ask({ title, text = '', input = null, ok = 'OK', danger = false }) {
     return new Promise(res => {
-      dlgResolve = res; dlgTitle.textContent = title; dlgText.textContent = text; dlgText.hidden = !text;
+      dlgResolve = res; dlgReturn = document.activeElement; dlgTitle.textContent = title; dlgText.textContent = text; dlgText.hidden = !text;
       dlgInput.hidden = input === null; dlgInput.value = input || ''; dlgOk.textContent = ok; dlgOk.style.background = danger ? '#ff6b6b' : ''; dlgOk.style.borderColor = danger ? '#ff6b6b' : '';
       dlg.hidden = false; setTimeout(() => (input === null ? dlgOk : dlgInput).focus(), 30);
     });
   }
-  function dlgClose(v) { dlg.hidden = true; const r = dlgResolve; dlgResolve = null; r && r(v); }
+  function dlgClose(v) { dlg.hidden = true; const r = dlgResolve; dlgResolve = null; const back = dlgReturn; dlgReturn = null; if (back && back.isConnected && back !== document.body) back.focus?.(); r && r(v); }
   dlgOk.addEventListener('click', () => dlgClose(dlgInput.hidden ? true : dlgInput.value.trim()));
   dlgCancel.addEventListener('click', () => dlgClose(null));
   dlgInput.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); dlgClose(dlgInput.value.trim()); } });
@@ -257,6 +257,7 @@
     brain.history.push({ at: new Date().toISOString(), q: fill(q.text, { sub: q.sub }), a: text, cat: q.cat, entries: ids, followup: q.source === 'follow-up' });
     brain.asks++; brain.lastCat = q.cat;
     save(); graph.rebuild(); renderCats(); if (selected) refreshPanel();
+    if (!selected) graph.ensureVisible(ids.map(id => brain.entries.find(e => e.id === id)?.sub).filter(Boolean));
     advance(q.first ? `Good to meet you, ${brain.name}.` : randomAck());
   }
   // the neuron an answer lands on: the question's subject (created on demand), or the centre for identity
@@ -357,7 +358,8 @@
   }
   function entryHtml(e) {
     if (isFile(e)) return '';
-    const txt = e.kind === 'link' ? `<a href="${esc(e.text)}" target="_blank" rel="noopener noreferrer">${esc(e.text)}</a>` : esc(e.text);
+    const safeHref = u => /^https?:\/\/\S+$/i.test(u) ? u : null; // only web links become anchors; anything else renders as text
+    const txt = e.kind === 'link' && safeHref(e.text) ? `<a href="${esc(e.text)}" target="_blank" rel="noopener noreferrer">${esc(e.text)}</a>` : esc(e.text);
     return `<li class="entry" data-id="${esc(e.id)}"><div class="lead">${esc(e.lead || (e.kind === 'note' ? 'Note' : e.kind === 'link' ? 'Link' : 'Answer'))}</div><div class="txt">${txt}</div><span class="ops"><button data-op="edit" title="Edit">✎</button><button data-op="del" title="Delete">×</button></span></li>`;
   }
   async function filesHtml(list) {
@@ -378,7 +380,7 @@
     h += `<h2 contenteditable="true" spellcheck="false" id="p-title" title="Click to rename">${esc(s.name)}</h2>`;
     h += `<p class="desc" id="p-desc" contenteditable="true" data-ph="Add a line about this…">${esc(s.desc || '')}</p>`;
     h += `<div class="ptools">${me ? '' : `<button data-t="star" class="${s.starred ? 'on' : ''}" title="Ask me more about this">★ ${s.starred ? 'Asking more' : 'Ask me more'}</button>`}${me ? '' : '<button data-t="move">Move to…</button><button data-t="del" class="danger">Delete</button>'}</div>`;
-    h += `<div class="meta"><span>${pw(notes.length, 'synapse')}</span><span>${pw(files.length, 'file')}</span><span>added ${s.created}</span></div>`;
+    h += `<div class="meta"><span>${pw(notes.length, 'synapse')}</span><span>${pw(files.length, 'file')}</span><span>added ${esc(s.created)}</span></div>`;
     h += `<div class="pa">`;
     h += `<h3>Synapses <span>${notes.length}</span></h3>`;
     h += notes.length ? `<ul>${notes.map(entryHtml).join('')}</ul>` : `<div class="empty">Nothing here yet. Answer a question about it, or add a note.</div>`;
@@ -471,10 +473,12 @@
 
   // ---------- questions modal ----------
   const qmodal = $('qmodal');
-  function openModal() { renderModal(); qmodal.hidden = false; }
+  let modalReturn = null;
+  function openModal() { renderModal(); modalReturn = document.activeElement; qmodal.hidden = false; setTimeout(() => $('qmodal-close').focus(), 30); }
+  function closeModal() { qmodal.hidden = true; const back = modalReturn; modalReturn = null; if (back && back.isConnected && back !== document.body) back.focus?.(); }
   $('act-questions').addEventListener('click', openModal);
-  $('qmodal-close').addEventListener('click', () => qmodal.hidden = true);
-  qmodal.addEventListener('click', e => { if (e.target === qmodal) qmodal.hidden = true; });
+  $('qmodal-close').addEventListener('click', closeModal);
+  qmodal.addEventListener('click', e => { if (e.target === qmodal) closeModal(); });
   $('modal-interest-add').addEventListener('submit', e => { e.preventDefault(); addInterest($('modal-interest-new').value); $('modal-interest-new').value = ''; renderModal(); });
   $('q-add').addEventListener('submit', e => {
     e.preventDefault();
@@ -523,8 +527,30 @@
   $('act-more').addEventListener('click', e => { e.stopPropagation(); moreMenu.hidden = !moreMenu.hidden; });
   document.addEventListener('click', e => { if (!e.target.closest('.actions')) moreMenu.hidden = true; });
   $('m-rename').addEventListener('click', async () => { moreMenu.hidden = true; const v = await promptDlg('What should I call you?', brain.name); if (v) { brain.name = v; subById('me').name = v; save(); graph.rebuild(); refreshPanel(); } });
-  $('m-reset').addEventListener('click', async () => { moreMenu.hidden = true; if (await confirmDlg('Start over with an empty brain?', 'Everything in this browser is erased. Save a copy first if you want to keep it.', 'Erase everything')) { await store.clear(); urlCache.forEach((u) => URL.revokeObjectURL(u)); urlCache.clear(); brain = emptyBrain(); await save(true); clearSelection(); graph.rebuild(true); renderCats(); iv.classList.remove('paused'); $('iv-pause').textContent = 'Pause'; advance(); toast('Fresh brain.'); } });
+  $('m-reset').addEventListener('click', async () => { moreMenu.hidden = true; if (await confirmDlg('Start over with an empty brain?', 'Everything in this browser is erased. Save a copy first if you want to keep it.', 'Erase everything')) { await store.clear(); urlCache.forEach((u) => URL.revokeObjectURL(u)); urlCache.clear(); brain = emptyBrain(); await save(true); clearSelection(); graph.rebuild(true); graph.fit(); renderCats(); iv.classList.remove('paused'); $('iv-pause').textContent = 'Pause'; advance(); toast('Fresh brain.'); } });
   $('m-export-data').addEventListener('click', () => { moreMenu.hidden = true; download(`window.MINDBLOWN = ${JSON.stringify(toDataset())};\n`, `${slug(brain.name || 'brain')}-data.js`, 'text/javascript'); toast('Dataset downloaded. Drop it into a MindBlown page as data.js.'); });
+  // A brain file is untrusted input: constrain every value that reaches HTML attributes or the layout.
+  const safeColor = v => /^#[0-9a-f]{3,8}$/i.test(String(v)) ? String(v) : '#9aa4b8';
+  const safeDate = v => /^\d{4}-\d{2}-\d{2}$/.test(String(v)) ? String(v) : today();
+  const str = (v, max = 4000) => typeof v === 'string' ? v.slice(0, max) : v == null ? '' : String(v).slice(0, max);
+  function sanitizeBrain(b) {
+    const base = emptyBrain();
+    const arr = v => Array.isArray(v) ? v.filter(x => x && typeof x === 'object') : [];
+    b.name = str(b.name, 80); b.created = safeDate(b.created); b.updated = safeDate(b.updated);
+    b.cats = arr(b.cats).map(c => ({ id: str(c.id, 60), name: str(c.name, 80) || 'Category', color: safeColor(c.color), enabled: c.enabled !== false, custom: !!c.custom, desc: str(c.desc, 400), icon: str(c.icon, 8) }));
+    if (!b.cats.some(c => c.id === 'you')) b.cats.unshift(base.cats[0]);
+    b.subjects = arr(b.subjects).map(s => ({ id: str(s.id, 60), cat: str(s.cat, 60), name: str(s.name, 120) || 'Neuron', starred: !!s.starred, desc: str(s.desc, 600), created: safeDate(s.created) }));
+    if (!b.subjects.some(s => s.id === 'me')) b.subjects.unshift({ ...base.subjects[0], name: b.name || 'Me' });
+    const kinds = ['answer', 'note', 'link', 'file'];
+    b.entries = arr(b.entries).map(e => ({ id: str(e.id, 60), kind: kinds.includes(e.kind) ? e.kind : 'note', lead: str(e.lead, 300), text: str(e.text, 20000), q: str(e.q, 120), sub: e.sub == null ? null : str(e.sub, 60), cat: str(e.cat, 60), created: safeDate(e.created), fileName: str(e.fileName, 255), fileType: str(e.fileType, 120), fileSize: Number(e.fileSize) || 0 }));
+    b.custom = arr(b.custom).map(q => ({ id: str(q.id, 60), cat: str(q.cat, 60), text: str(q.text, 500), sub: str(q.sub, 120), type: str(q.type, 20) || 'text', list: q.type === 'list' }));
+    b.followups = arr(b.followups).map(f => ({ id: str(f.id, 60), cat: str(f.cat, 60), sub: f.sub == null ? null : str(f.sub, 120), subId: f.subId == null ? null : str(f.subId, 60), type: str(f.type, 20) || 'long', text: str(f.text, 500), parent: str(f.parent, 120) }));
+    b.interests = Array.isArray(b.interests) ? b.interests.map(i => str(i, 70)) : [];
+    b.disabled = Array.isArray(b.disabled) ? b.disabled.map(i => str(i, 120)) : [];
+    b.answered = b.answered && typeof b.answered === 'object' ? b.answered : {}; b.skipped = b.skipped && typeof b.skipped === 'object' ? b.skipped : {};
+    b.history = Array.isArray(b.history) ? b.history.slice(-200) : []; b.paused = !!b.paused; b.interestsChosen = !!b.interestsChosen;
+    return b;
+  }
   const slug = s => s.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'brain';
   function download(content, name, type) { const b = content instanceof Blob ? content : new Blob([content], { type }); const u = URL.createObjectURL(b); const a = document.createElement('a'); a.href = u; a.download = name; document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(u), 4000); }
 
@@ -541,9 +567,9 @@
     if (!doc || doc.app !== 'mindblown-build' || !doc.brain) { toast('That is not a MindBlown brain file.'); return; }
     if (brain.entries.length && !(await confirmDlg('Replace the current brain?', 'The brain in this browser is replaced by the file. Save a copy first if you want to keep it.', 'Replace'))) return;
     await store.clear(); urlCache.forEach(u => URL.revokeObjectURL(u)); urlCache.clear();
-    brain = { ...emptyBrain(), ...doc.brain };
+    brain = sanitizeBrain({ ...emptyBrain(), ...doc.brain });
     for (const f of doc.files || []) { try { const bin = atob(f.data); const arr = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i); await store.putFile(f.id, new Blob([arr], { type: f.type })); } catch { /* skip a broken file */ } }
-    await save(true); clearSelection(); graph.rebuild(true); renderCats(); iv.classList.toggle('paused', brain.paused); $('iv-pause').textContent = brain.paused ? 'Resume' : 'Pause'; advance(`Welcome back, ${brain.name}.`); toast('Brain loaded.');
+    await save(true); clearSelection(); graph.rebuild(true); graph.fit(); renderCats(); iv.classList.toggle('paused', brain.paused); $('iv-pause').textContent = brain.paused ? 'Resume' : 'Pause'; advance(`Welcome back, ${brain.name}.`); toast('Brain loaded.');
   }
   $('act-save').addEventListener('click', exportBrain);
   $('act-open').addEventListener('click', () => $('file-open').click());
@@ -598,7 +624,7 @@
   function mark() { results.querySelectorAll('li').forEach((li, i) => li.classList.toggle('active', i === activeIdx)); }
   function choose(i) { const h = resultItems[i]; if (!h) return; hideResults(); q.blur(); h.kind === 'sub' ? selectSub(h.id) : selectCat(h.id); }
   document.addEventListener('click', e => { if (!e.target.closest('.search')) hideResults(); });
-  window.addEventListener('keydown', e => { if (e.key === 'Escape') { if (!lb.hidden) lb.click(); else if (!qmodal.hidden) qmodal.hidden = true; else if (!$('explorer').hidden) $('explorer-close').click(); else if (!dlg.hidden) dlgClose(null); else { clearSelection(); hideResults(); } } });
+  window.addEventListener('keydown', e => { if (e.key === 'Escape') { if (!dlg.hidden) dlgClose(null); else if (!lb.hidden) lb.click(); else if (!qmodal.hidden) closeModal(); else if (!$('explorer').hidden) $('explorer-close').click(); else { clearSelection(); hideResults(); } } });
 
   // ---------- the living brain (canvas) ----------
   const graph = (() => {
@@ -661,7 +687,7 @@
 
     function rebuild(warm) {
       layoutAnchors();
-      const prev = byId; byId.clear();
+      const prev = new Map(byId); byId.clear();
       subNodes = brain.subjects.map(s => {
         const es = entriesOf(s.id); const o = prev.get(s.id);
         const n = o || { id: s.id, kind: 'sub', spin: Math.random() * Math.PI * 2 };
@@ -708,6 +734,13 @@
     api.focusCat = id => { const ps = subNodes.filter(p => p.cat === id); const a = anchor[id] || anchor.you; const cx = ps.length ? d3.mean(ps, p => p.x) : a.x, cy = ps.length ? d3.mean(ps, p => p.y) : a.y; zoomTo(cx, cy, Math.max(0.9, Math.min(k, 1.3))); };
     api.nodeFor = id => byId.get(id) || null;
     api.fit = fitAll;
+    // after an answer: if the neurons it landed on sit outside the visible stage, pull the camera back so growth is never off-screen
+    api.ensureVisible = ids => {
+      const ps = ids.map(id => byId.get(id)).filter(Boolean); if (!ps.length) return;
+      const padL = mobile() ? 0 : 410, padR = mobile() ? 0 : 340, top = 70, bottom = mobile() ? H * 0.4 : H - 60;
+      const off = ps.some(n => { const sx = n.x * k + tx, sy = n.y * k + ty; return sx < padL + 30 || sx > W - padR - 30 || sy < top || sy > bottom; });
+      if (off) fitAll();
+    };
 
     // pulses
     const pulses = []; let lastPulse = 0;
@@ -896,7 +929,7 @@
   (async () => {
     await store.open();
     const saved = await store.loadBrain();
-    brain = saved ? { ...emptyBrain(), ...saved } : emptyBrain();
+    brain = saved ? sanitizeBrain({ ...emptyBrain(), ...saved }) : emptyBrain();
     if (!saved) await save(true);
     updateStore(); renderCats(); graph.start();
     iv.classList.toggle('paused', brain.paused); $('iv-pause').textContent = brain.paused ? 'Resume' : 'Pause';
