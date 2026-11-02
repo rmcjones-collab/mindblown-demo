@@ -164,7 +164,7 @@ LOBE_SESS = {l["id"]: random.sample(SESSIONS, 9) for l in LOBES}
 def pick_sources(lobe):
     out = random.sample(LOBE_SESS[lobe], random.randint(2, 4))
     if lobe in LOBE_REPO and random.random() < 0.8:
-        out += [f"https://github.com/{REPOS[LOBE_REPO[lobe]]}/pull/{random.randint(3, 42)}" for _ in range(random.randint(1, 2))]
+        out += [f"https://git.example.test/{REPOS[LOBE_REPO[lobe]]}/pull/{random.randint(3, 42)}" for _ in range(random.randint(1, 2))]
     if random.random() < 0.15:
         out.append(random.choice(WEB))
     return out
@@ -181,7 +181,7 @@ def add_source(uri, pid):
     if uri not in sources:
         if uri.startswith("pplx://sessions/"):
             sources[uri] = dict(id=uri, label=uri.split("/")[-1][:8], kind="session", pages=[])
-        elif "github.com" in uri:
+        elif "git.example.test" in uri:
             sources[uri] = dict(id=uri, label="/".join(uri.split("/")[3:5]) + " #" + uri.rsplit("/", 1)[-1], kind="github", pages=[])
         else:
             sources[uri] = dict(id=uri, label=uri.split("/")[2], kind="web", pages=[])

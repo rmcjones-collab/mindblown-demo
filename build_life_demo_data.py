@@ -37,7 +37,7 @@ def SES(title, date): return src(f'pplx://sessions/{U()}', f'{title[:48]} · {da
 def GM(subject, date, frm=None): return src(f'https://mail.example.test/demo/{U()[:12]}', f'{subject[:48]} · {date}', 'gmail')
 def CAL(title, date): return src(f'gcal://demo-{U()[:10]}', f'{title[:48]} · {date}', 'calendar')
 def SP(name): return src(f'https://music.example.test/playlist/{U()[:16]}', f'Music · {name[:40]}', 'spotify')
-def GH(repo): return src(f'https://github.com/sam-vale/{repo}', f'sam-vale/{repo}', 'github')
+def GH(repo): return src(f'https://git.example.test/sam-vale/{repo}', f'sam-vale/{repo}', 'github')
 def MEM(path, label): return src('memory://notes/' + path, 'Memory · ' + label, 'memory')
 def WIKI(pid, label): return src('wiki://' + pid, 'Brain · ' + label, 'wiki')
 def WEB(url, label): return src(url, label, 'web')
