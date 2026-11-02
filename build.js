@@ -809,7 +809,7 @@
     const base = new URL('./', location.href).href;
     const html = await fetch('./index.html').then(r => r.text()).catch(() => null);
     if (!html) { toast('Could not load the explorer.'); return; }
-    const doc = html.replace(/<script src="\.\/data\.js"><\/script>/, `<script>window.MINDBLOWN=${JSON.stringify(toDataset()).replace(/<\//g, '<\\/')};</script>`)
+    const doc = html.replace(/<script src="\.\/data\.js"><\/script>/, `<script>window.MINDBLOWN=${JSON.stringify(toDataset()).replace(/</g, '\\u003c')};</script>`)
       .replace('<head>', `<head><base href="${base}">`).replace(/<nav class="brains"[\s\S]*?<\/nav>/, '');
     $('explorer-frame').srcdoc = doc; $('explorer').hidden = false;
   }
