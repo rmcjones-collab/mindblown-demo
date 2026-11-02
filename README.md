@@ -58,3 +58,7 @@ cocite[]    {s, t, w}                        pages sharing a source
 ## Depth: sub-neurons
 
 Give any page a `"parent": "<page id>"` and it becomes a sub-neuron: folded into its parent at lobe zoom, unfolding onto a ring around it past 0.85×, exploding into its own synapses past 1.5×. The side panel lists `Sub-neurons` on the parent and `Part of` on the child.
+
+## For Claude Code
+
+Start with `CLAUDE.md` (rules and conventions) and `HANDOFF-CLAUDE-CODE.md` (module map, QA harness, review dispositions, backlog). QA: `node tools/qa-shot.cjs <url>` and `node tools/qa-depth.cjs <url>` against a local `python3 -m http.server`.
