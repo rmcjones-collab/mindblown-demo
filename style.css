@@ -178,3 +178,12 @@ input { font: inherit; }
 .nb.net { display: block; padding: 0; }
 .nb.net a { display: grid; grid-template-columns: 10px 1fr; gap: 10px; align-items: baseline; padding: 7px 10px; color: inherit; text-decoration: none; }
 .nb.net .note { color: var(--accent); }
+
+/* tools: select / pan / release, stacked above the zoom buttons */
+.zoom-ctl.tools { bottom: 170px; }
+.zoom-ctl.tools button.on { background: var(--text); color: #0b0e14; }
+#brain.select { cursor: crosshair; }
+#brain.select.pointer { cursor: grab; }
+#brain.moving { cursor: grabbing; }
+#brain.space { cursor: grab; }
+@media (max-width: 900px) { .zoom-ctl.tools { display: none; } }

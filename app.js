@@ -15,11 +15,17 @@
   // ---------- model ----------
   const lobes = D.lobes;
   const lobeById = Object.fromEntries(lobes.map(l => [l.id, l]));
+  // a network data file lists several brains, each with its own hub ("self") lobe; a single brain has lobe 'self' and D.center
+  const brainsIn = D.brains || null;
+  const selfLobe = l => !!l.self || l.id === 'self';
+  const selfIds = new Set(lobes.filter(selfLobe).map(l => l.id));
+  const isSelf = n => selfIds.has(n.lobe);
+  const centers = new Set(D.centers || (D.center ? [D.center] : []));
   const lobeOn = Object.fromEntries(lobes.map(l => [l.id, !l.hidden]));
 
   const pageById = {};
   const pages = D.pages.map(p0 => { const p = { ...p0, parentId: p0.parent || null }; delete p.parent;
-    const n = { ...p, kind: 'page', nSyn: p.synapses.length, deg: 0, r: 0, neighbors: [], synNodes: [], srcNodes: [], children: [], parent: null, isCenter: p.id === D.center };
+    const n = { ...p, kind: 'page', nSyn: p.synapses.length, deg: 0, r: 0, neighbors: [], synNodes: [], srcNodes: [], children: [], parent: null, isCenter: centers.has(p.id) };
     pageById[p.id] = n; return n;
   });
   // one level deeper: a page may name a parent neuron; it then orbits that neuron as a sub-neuron
@@ -55,14 +61,33 @@
   // radius of the ring a parent's sub-neurons sit on once unfolded
   const childRingR = p => p.r + 42 + Math.sqrt(p.children.length) * 16 + explodeF * (orbitR(p) * 0.6);
 
-  // lobe anchors on a ring; the centre page sits in the middle
-  const ring = lobes.filter(l => l.id !== 'self').map(l => l.id);
-  const R = 760;
-  const anchor = { self: { x: 0, y: 0 } };
+  // lobe anchors: one brain puts its hub in the middle and its lobes on a ring around it.
+  // A network puts each brain's hub on a big circle, that brain's lobes on an outward-facing arc around its hub,
+  // and the shared lobes (same neuron ids in every brain) in the middle where all the brains can reach them.
+  const anchor = {};
+  const hubOf = {};   // lobe id → the point its halo label faces away from
   const lobeCount = {}; pages.forEach(p => { lobeCount[p.lobe] = (lobeCount[p.lobe] || 0) + 1; });
-  const span = ring.map(id => Math.sqrt(lobeCount[id] || 1) + 2.6), total = d3.sum(span);
-  let acc = -Math.PI / 2 - (span[0] / total) * Math.PI;
-  ring.forEach((id, i) => { const a = acc + (span[i] / total) * Math.PI; acc += (span[i] / total) * Math.PI * 2; anchor[id] = { x: Math.cos(a) * R, y: Math.sin(a) * R }; });
+  function arcAnchors(ids, cx, cy, R, start, sweep) {
+    const span = ids.map(id => Math.sqrt(lobeCount[id] || 1) + 2.6), total = d3.sum(span);
+    let acc = start;
+    ids.forEach((id, i) => { const a = acc + (span[i] / total) * sweep / 2; acc += (span[i] / total) * sweep; anchor[id] = { x: cx + Math.cos(a) * R, y: cy + Math.sin(a) * R }; hubOf[id] = { x: cx, y: cy }; });
+  }
+  if (!brainsIn) {
+    anchor.self = { x: 0, y: 0 };
+    const ring = lobes.filter(l => !selfLobe(l)).map(l => l.id);
+    const span0 = Math.sqrt(lobeCount[ring[0]] || 1) + 2.6, total = d3.sum(ring.map(id => Math.sqrt(lobeCount[id] || 1) + 2.6));
+    arcAnchors(ring, 0, 0, 760, -Math.PI / 2 - (span0 / total) * Math.PI, Math.PI * 2);
+  } else {
+    const NB = brainsIn.length, RB = NB === 1 ? 0 : 1550 + 250 * Math.max(0, NB - 2);
+    brainsIn.forEach((b, i) => {
+      const th = Math.PI + (Math.PI * 2 * i) / NB, hx = Math.cos(th) * RB, hy = Math.sin(th) * RB;
+      b.hub = { x: hx, y: hy }; anchor[b.self] = b.hub;
+      const own = lobes.filter(l => l.brain === b.id && !selfLobe(l)).map(l => l.id);
+      arcAnchors(own, hx, hy, 820, th - Math.PI * 0.7, Math.PI * 1.4);   // the inner 0.6π stays open towards the shared lobes
+    });
+    const sharedL = lobes.filter(l => !l.brain && !selfLobe(l)).map(l => l.id);
+    sharedL.forEach((id, j) => { const m = sharedL.length, a = -Math.PI / 2 + (Math.PI * 2 * j) / m, r = m === 1 ? 0 : 430; anchor[id] = { x: Math.cos(a) * r, y: Math.sin(a) * r }; hubOf[id] = { x: 0, y: 0 }; });
+  }
   pages.forEach(p => { if (isChild(p)) return; const a = anchor[p.lobe]; p.x = a.x + (Math.random() - 0.5) * 220; p.y = a.y + (Math.random() - 0.5) * 220; });
   pages.forEach(p => { if (!isChild(p)) return; p.x = p.parent.x + (Math.random() - 0.5) * 6; p.y = p.parent.y + (Math.random() - 0.5) * 6; });
   syns.forEach(s => { const p = pageById[s.page]; s.x = p.x + (Math.random() - 0.5) * 4; s.y = p.y + (Math.random() - 0.5) * 4; });
@@ -74,6 +99,11 @@
   let depthF = 0, depthTarget = 0;       // 0 sub-neurons folded into parents → 1 unfolded
   let forceExplode = false, showCocite = false;
   let hover = null, selected = null, pulseSyn = null;
+  // tools: 'select' = left-drag draws a marquee and moves neurons; 'pan' = left-drag pans (the classic behaviour)
+  let mode = 'select', spaceDown = false;
+  const multi = new Set();              // marquee-selected neurons; dragging one moves them all
+  let marquee = null;                   // {x0,y0,x1,y1} in screen px while a marquee is open
+  let drag = null;                      // {nodes:[{n,x,y}], sx, sy} while neurons are being moved
   let W = 0, H = 0, dpr = 1;
   let activeNodes = [], activeLinks = [];
 
@@ -82,8 +112,11 @@
   const visible = n => n.kind === 'page' ? pageOn(n) : n.kind === 'syn' ? pageOn(pageById[n.page]) : n.pageNodes.some(pageOn);
 
   // ---------- simulation ----------
+  // a link that leaves a brain's own lobes (into a shared lobe or another brain) is long and slack on the network screen
+  const lobeBrain = id => lobeById[id]?.brain || null;
+  const crossBrain = l => !!brainsIn && lobeBrain(l.source.lobe) !== lobeBrain(l.target.lobe);
   const linkDist = l => {
-    if (l.kind === 'pp') return (l.source.type === 'day' || l.target.type === 'day' ? 170 : l.source.lobe !== l.target.lobe ? 200 : 78 + 12 * (5 - Math.min(l.w, 4)) + 30) + explodeF * (orbitR(l.source) + orbitR(l.target)) * 0.7;
+    if (l.kind === 'pp') return (l.source.type === 'day' || l.target.type === 'day' ? 170 : crossBrain(l) ? 420 : l.source.lobe !== l.target.lobe ? 200 : 78 + 12 * (5 - Math.min(l.w, 4)) + 30) + explodeF * (orbitR(l.source) + orbitR(l.target)) * 0.7;
     if (l.kind === 'st') return 4 + explodeF * orbitR(l.target);
     if (l.kind === 'sx') return 110;
     if (l.kind === 'sr') return 12 + explodeF * (44 + (l.source.pageNodes.length > 1 ? 30 : 0));
@@ -91,7 +124,7 @@
     return 160;
   };
   const linkStrength = l => {
-    if (l.kind === 'pp') return l.source.type === 'day' || l.target.type === 'day' ? 0.02 : l.source.lobe !== l.target.lobe ? 0.08 : 0.3;
+    if (l.kind === 'pp') return l.source.type === 'day' || l.target.type === 'day' ? 0.02 : crossBrain(l) ? 0.015 : l.source.lobe !== l.target.lobe ? 0.08 : 0.3;
     if (l.kind === 'st') return 0.15;
     if (l.kind === 'sx') return 0.03;
     if (l.kind === 'sr') return l.source.pageNodes.length > 1 ? 0.12 : 0.5;
@@ -130,7 +163,8 @@
     }
   }
   const lobeSize = {}; pages.forEach(p => { if (!isChild(p)) lobeSize[p.lobe] = (lobeSize[p.lobe] || 0) + 1; });
-  const anchorStrength = n => n.kind !== 'page' ? 0 : isChild(n) ? 0.02 : n.lobe === 'self' ? 0.6 : n.type === 'day' ? 0.5 : lobeSize[n.lobe] <= 4 ? 0.55 : lobeSize[n.lobe] <= 10 ? 0.4 : 0.22;
+  // on the shared network screen the lobes hold their ground harder, otherwise the many links into the shared neurons drag every brain into the middle
+  const anchorStrength = n => n.kind !== 'page' ? 0 : isChild(n) ? 0.02 : isSelf(n) ? (brainsIn ? 0.9 : 0.6) : n.type === 'day' ? 0.5 : (lobeSize[n.lobe] <= 4 ? 0.55 : lobeSize[n.lobe] <= 10 ? 0.4 : 0.22) * (brainsIn ? 1.7 : 1);
   const sim = d3.forceSimulation()
     .force('link', d3.forceLink().id(d => d.id).distance(linkDist).strength(linkStrength))
     .force('charge', chargeForce)
@@ -153,7 +187,7 @@
       .filter(l => on.has(l.source) && on.has(l.target));
     sim.nodes(activeNodes);
     sim.force('link').links(activeLinks);
-    if (warm) { sim.alpha(1); for (let i = 0; i < 260; i++) sim.tick(); }
+    if (warm) { sim.alpha(1); for (let i = 0; i < (brainsIn ? 420 : 260); i++) sim.tick(); }
     sim.alpha(warm ? 0.25 : 0.5).restart();
     updateStats();
   }
@@ -169,8 +203,16 @@
   window.addEventListener('resize', resize);
   resize();
 
-  const zoom = d3.zoom().scaleExtent([0.14, 9]).on('zoom', ev => { k = ev.transform.k; tx = ev.transform.x; ty = ev.transform.y; updateLevel(); })
-    .filter(ev => !ev.button);
+  // panning: wheel and touch always; the mouse pans with the left button in Pan mode, with the middle/right button (or Space) in
+  // Select mode, and never when the press lands on a neuron, because that press moves the neuron instead
+  const zoom = d3.zoom().scaleExtent([0.08, 9]).on('zoom', ev => { k = ev.transform.k; tx = ev.transform.x; ty = ev.transform.y; updateLevel(); })
+    .filter(ev => {
+      if (ev.type === 'wheel' || ev.type.startsWith('touch')) return !ev.ctrlKey || ev.type === 'wheel';
+      if (ev.type !== 'mousedown') return !ev.button;
+      const onNeuron = pick(ev.clientX, ev.clientY)?.kind === 'page';
+      if (ev.button === 1 || ev.button === 2) return !onNeuron;
+      return ev.button === 0 && (mode === 'pan' || spaceDown) && !onNeuron;
+    });
   d3.select(canvas).call(zoom).on('dblclick.zoom', null);
 
   const toWorld = (sx, sy) => [(sx - tx) / k, (sy - ty) / k];
@@ -178,8 +220,11 @@
 
   function fitAll(dur = 900) {
     const vp = pages.filter(p => visible(p) && !isChild(p));
-    const xs = vp.map(p => p.x), ys = vp.map(p => p.y);
-    const minX = Math.min(...xs) - 150, maxX = Math.max(...xs) + 150, minY = Math.min(...ys) - 170, maxY = Math.max(...ys) + 170;
+    // on the network screen the lobes keep drifting outwards for a while, so fit the planned anchors rather than the live positions
+    const pts = brainsIn ? Object.values(anchor) : vp;
+    const xs = pts.map(p => p.x), ys = pts.map(p => p.y);
+    const mx = brainsIn ? 760 : 150, my = brainsIn ? 420 : 170;
+    const minX = Math.min(...xs) - mx, maxX = Math.max(...xs) + mx, minY = Math.min(...ys) - my, maxY = Math.max(...ys) + my;
     const padL = window.innerWidth <= 900 ? 0 : 230; // keep the fitted brain clear of the lobes legend on desktop
     const kk = Math.min((W - 60 - padL) / (maxX - minX), (H - 200) / (maxY - minY)) * 0.96;
     const cx = (minX + maxX) / 2, cy = (minY + maxY) / 2;
@@ -252,29 +297,50 @@
     // lobe halos
     if (lobeVis > 0) {
       ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic';
-      lobes.forEach(l => {
-        if (!lobeOn[l.id] || l.id === 'self') return;
-        const ps = pages.filter(p => p.lobe === l.id);
-        if (!ps.length) return;
+      // lobe circles first, so a title can avoid both other titles and other lobes' neurons
+      const circles = lobes.filter(l => lobeOn[l.id] && !selfLobe(l)).map(l => {
+        const ps = pages.filter(p => p.lobe === l.id); if (!ps.length) return null;
         const cx = d3.mean(ps, p => p.x), cy = d3.mean(ps, p => p.y);
         const rr = Math.max(44, d3.quantile(ps.map(p => Math.hypot(p.x - cx, p.y - cy)).sort(d3.ascending), 0.92) + 48);
-        const fs = Math.min(W / 22, 13 + Math.sqrt(ps.length) * 2.4);
-        ctx.font = `600 ${sw(fs)}px 'Clash Display', 'Satoshi', sans-serif`;
+        const [sx, sy] = toScreen(cx, cy); return { l, ps, cx, cy, rr, sx, sy, sr: rr * k };
+      }).filter(Boolean).sort((a, b) => b.ps.length - a.ps.length);   // big lobes claim their spot first; small ones walk
+      const placed = [];   // screen-space label boxes already drawn this frame, so lobe titles never stack on each other
+      const hitsBox = b => placed.some(q => b.x < q.x + q.w && b.x + b.w > q.x && b.y < q.y + q.h && b.y + b.h > q.y);
+      const hitsCircle = (b, self) => circles.some(c => c !== self && Math.hypot(Math.max(b.x, Math.min(c.sx, b.x + b.w)) - c.sx, Math.max(b.y, Math.min(c.sy, b.y + b.h)) - c.sy) < c.sr * 0.9);
+      circles.forEach(c => {
+        const { l, ps, cx, cy, rr } = c;
+        // network screen: lobe titles shrink as the view zooms out so a dozen lobes can share one screen
+        const shrink = brainsIn ? Math.min(1, Math.max(0.62, k / 0.34)) : 1;
+        const fs = Math.min(W / (brainsIn ? 36 : 22), 13 + Math.sqrt(ps.length) * 2.4) * shrink, fs2 = Math.max(9.5, Math.min(W / 32, 12) * shrink);
         ctx.beginPath(); ctx.arc(cx, cy, rr, 0, Math.PI * 2);
         ctx.fillStyle = rgba(l.color, 0.05 * lobeVis); ctx.fill();
         ctx.lineWidth = sw(1); ctx.strokeStyle = rgba(l.color, 0.22 * lobeVis); ctx.stroke();
-        // labels sit on the outward side of the ring so neighbouring lobes never stack their text
-        const dl = Math.hypot(cx, cy) || 1, ux = dl > 1 ? cx / dl : 0, uy = dl > 1 ? cy / dl : -1;
-        const ax = cx + ux * (rr + sw(14)), ay = cy + uy * (rr + sw(14)), lh = sw(fs + 6);
-        ctx.textAlign = Math.abs(ux) < 0.35 ? 'center' : ux > 0 ? 'left' : 'right';
-        ctx.textBaseline = 'middle';
-        const top = uy < 0;
-        ctx.fillStyle = rgba(l.color, 0.85 * lobeVis);
-        ctx.fillText(l.name, ax, top ? ay - lh : ay);
-        ctx.font = `500 ${sw(Math.min(W / 32, 12))}px 'Satoshi', sans-serif`;
-        ctx.fillStyle = rgba('#a7b2cc', 0.8 * lobeVis);
+        // labels prefer the outward side of the ring (away from the brain's hub); if that spot is taken they walk around the ring
+        const o = hubOf[l.id] || { x: 0, y: 0 }, dl = Math.hypot(cx - o.x, cy - o.y) || 1;
+        const a0 = dl > 1 ? Math.atan2(cy - o.y, cx - o.x) : -Math.PI / 2;
         const subs = ps.filter(isChild).length;
-        ctx.fillText(`${plural(ps.length - subs, 'neuron')}${subs ? ` · ${plural(subs, 'sub-neuron')}` : ''} · ${plural(d3.sum(ps, p => p.nSyn), 'synapse')}`, ax, top ? ay : ay + lh);
+        const line2 = `${plural(ps.length - subs, 'neuron')}${subs ? ` · ${plural(subs, 'sub-neuron')}` : ''} · ${plural(d3.sum(ps, p => p.nSyn), 'synapse')}`;
+        ctx.font = `600 ${fs}px 'Clash Display', 'Satoshi', sans-serif`; const w1 = ctx.measureText(l.name).width;
+        ctx.font = `500 ${fs2}px 'Satoshi', sans-serif`; const w2 = ctx.measureText(line2).width;
+        const bw = Math.max(w1, w2), bh = fs + fs2 + 10;
+        let best = null;
+        const tries = [0, 0.5, -0.5, 1, -1, 1.5, -1.5, 2, -2, 2.5, -2.5, Math.PI].flatMap(da => [[da, 14], [da, 14 + bh], [da, 14 + 2 * bh]]);   // walk the ring, then rings further out
+        tries.sort((p, q) => (Math.abs(p[0]) + p[1] / 40) - (Math.abs(q[0]) + q[1] / 40));
+        for (const [da, off] of tries) {
+          const ang = a0 + da, ux = Math.cos(ang), uy = Math.sin(ang);
+          const [sx, sy] = toScreen(cx + ux * (rr + sw(off)), cy + uy * (rr + sw(off)));
+          const align = Math.abs(ux) < 0.35 ? 'center' : ux > 0 ? 'left' : 'right';
+          const bx = align === 'center' ? sx - bw / 2 : align === 'left' ? sx : sx - bw, by = uy < -0.35 ? sy - bh : uy > 0.35 ? sy : sy - bh / 2;
+          const box = { x: bx, y: by, w: bw, h: bh, sx, sy, align };
+          if (!best) best = box;
+          if (!hitsBox(box) && !hitsCircle(box, c)) { best = box; break; }
+        }
+        placed.push(best);
+        ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+        ctx.textAlign = best.align; ctx.textBaseline = 'top';
+        ctx.font = `600 ${fs}px 'Clash Display', 'Satoshi', sans-serif`; ctx.fillStyle = rgba(l.color, 0.85 * lobeVis); ctx.fillText(l.name, best.sx, best.y + 2);
+        ctx.font = `500 ${fs2}px 'Satoshi', sans-serif`; ctx.fillStyle = rgba('#a7b2cc', 0.8 * lobeVis); ctx.fillText(line2, best.sx, best.y + fs + 8);
+        ctx.setTransform(dpr, 0, 0, dpr, 0, 0); ctx.translate(tx, ty); ctx.scale(k, k);
         ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic';
       });
     }
@@ -424,18 +490,28 @@
       }
       if (n === selected) { ctx.strokeStyle = rgba('#ffffff', 0.9); ctx.lineWidth = sw(1.6); ctx.beginPath(); ctx.arc(n.x, n.y, r + sw(9), 0, Math.PI * 2); ctx.stroke(); }
       else if (n === hover) { ctx.strokeStyle = rgba('#ffffff', 0.6); ctx.lineWidth = sw(1.2); ctx.beginPath(); ctx.arc(n.x, n.y, r + sw(7), 0, Math.PI * 2); ctx.stroke(); }
+      // marquee-selected neurons wear an accent ring; pinned (hand-placed) neurons a faint solid one
+      if (multi.has(n) && n !== selected) { ctx.strokeStyle = rgba('#ff8a3d', 0.9); ctx.lineWidth = sw(1.4); ctx.beginPath(); ctx.arc(n.x, n.y, r + sw(8), 0, Math.PI * 2); ctx.stroke(); }
+      if (n.pinned) { ctx.strokeStyle = rgba('#ffffff', 0.22 * a); ctx.lineWidth = sw(0.8); ctx.beginPath(); ctx.arc(n.x, n.y, r + sw(12), 0, Math.PI * 2); ctx.stroke(); }
       // label
-      const important = n.lobe === 'self' || n.deg >= 18 || n.r > 12.5;
-      const lv = isChild(n) ? childLabelVis : n.lobe === 'self' ? 1 : important ? Math.max(labelVis, clamp01((k - 0.45) / 0.25)) : labelVis;
+      const important = isSelf(n) || n.deg >= 18 || n.r > 12.5;
+      const lv = isChild(n) ? childLabelVis : isSelf(n) ? 1 : important ? Math.max(labelVis, clamp01((k - 0.45) / 0.25)) : labelVis;
       if (lv > 0.02 && (related || lv > 0.6)) {
-        const fs = n.lobe === 'self' ? 15 : isChild(n) ? 10.5 : 12;
-        ctx.font = `${n.lobe === 'self' ? 600 : 500} ${sw(fs)}px 'Satoshi', sans-serif`; ctx.textAlign = 'center'; ctx.textBaseline = 'top';
+        const fs = isSelf(n) ? 15 : isChild(n) ? 10.5 : 12;
+        ctx.font = `${isSelf(n) ? 600 : 500} ${sw(fs)}px 'Satoshi', sans-serif`; ctx.textAlign = 'center'; ctx.textBaseline = 'top';
         ctx.fillStyle = rgba('#000000', 0.55 * lv * a); ctx.fillText(n.title, n.x + sw(0.8), n.y + r + sw(5.8));
         ctx.fillStyle = rgba(related ? '#f1f4ff' : '#9aa5c2', (related ? 0.95 : 0.5) * lv);
         ctx.fillText(n.title, n.x, n.y + r + sw(5));
       }
     });
 
+    // marquee rectangle (screen space)
+    if (marquee) {
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      const x = Math.min(marquee.x0, marquee.x1), y = Math.min(marquee.y0, marquee.y1), w = Math.abs(marquee.x1 - marquee.x0), h = Math.abs(marquee.y1 - marquee.y0);
+      ctx.fillStyle = 'rgba(255,138,61,0.08)'; ctx.fillRect(x, y, w, h);
+      ctx.strokeStyle = 'rgba(255,138,61,0.8)'; ctx.lineWidth = 1; ctx.setLineDash([5, 4]); ctx.strokeRect(x + 0.5, y + 0.5, w, h); ctx.setLineDash([]);
+    }
     requestAnimationFrame(draw);
   }
 
@@ -469,14 +545,70 @@
     return best;
   }
   const tip = document.getElementById('tip');
-  let dragging = false, downAt = null;
-  canvas.addEventListener('pointerdown', e => { downAt = [e.clientX, e.clientY]; canvas.classList.add('grabbing'); });
-  canvas.addEventListener('pointerup', e => {
-    canvas.classList.remove('grabbing');
-    if (downAt && Math.hypot(e.clientX - downAt[0], e.clientY - downAt[1]) < 5) { const n = pick(e.clientX, e.clientY); n ? select(n) : clearSelection(); }
-    downAt = null;
+  let downAt = null, downBtn = 0, downShift = false, pressed = null;
+  canvas.addEventListener('contextmenu', e => e.preventDefault());   // the right button moves neurons / pans, so no menu
+  window.addEventListener('keydown', e => { if (e.code === 'Space' && !e.target.closest('input')) { spaceDown = true; canvas.classList.add('space'); } });
+  window.addEventListener('keyup', e => { if (e.code === 'Space') { spaceDown = false; canvas.classList.remove('space'); } });
+  canvas.addEventListener('pointerdown', e => {
+    if (e.pointerType === 'touch') return;                            // touch is pan/pinch via d3-zoom
+    downAt = [e.clientX, e.clientY]; downBtn = e.button; downShift = e.shiftKey; pressed = pick(e.clientX, e.clientY);
+    const onNeuron = pressed?.kind === 'page';
+    // mouse3 (middle or right button) on a neuron picks it up; in Select mode the left button does too
+    if (onNeuron && (e.button === 1 || e.button === 2 || (e.button === 0 && mode === 'select' && !spaceDown))) {
+      const group = multi.has(pressed) ? [...multi] : [pressed];
+      drag = { nodes: group.map(n => ({ n, x: n.x, y: n.y })), sx: e.clientX, sy: e.clientY, moved: false };
+      canvas.setPointerCapture(e.pointerId); canvas.classList.add('moving'); tip.hidden = true;
+    } else if (!onNeuron && e.button === 0 && mode === 'select' && !spaceDown) {
+      marquee = { x0: e.clientX, y0: e.clientY, x1: e.clientX, y1: e.clientY };
+      canvas.setPointerCapture(e.pointerId);
+    } else canvas.classList.add('grabbing');
   });
+  canvas.addEventListener('pointerup', e => {
+    canvas.classList.remove('grabbing'); canvas.classList.remove('moving');
+    const small = downAt && Math.hypot(e.clientX - downAt[0], e.clientY - downAt[1]) < 5;
+    if (drag) {
+      if (drag.moved) { drag.nodes.forEach(({ n }) => { n.pinned = true; n.fx = n.x; n.fy = n.y; }); sim.alpha(Math.max(sim.alpha(), 0.2)).restart(); }
+      else if (downBtn === 0) clickNeuron(pressed, downShift);
+      else if (!multi.has(pressed)) { multi.clear(); multi.add(pressed); updateHint(); }   // a plain mouse3 click just picks the neuron for moving
+      drag = null;
+    } else if (marquee) {
+      if (!small) finishMarquee(downShift); else { if (!downShift) { multi.clear(); clearSelection(); } updateHint(); }
+      marquee = null;
+    } else if (small && downBtn === 0) { const n = pick(e.clientX, e.clientY); n ? clickNeuron(n, downShift) : (multi.clear(), clearSelection(), updateHint()); }
+    downAt = null; pressed = null;
+  });
+  function clickNeuron(n, shift) {
+    if (n.kind === 'page' && shift) { multi.has(n) ? multi.delete(n) : multi.add(n); updateHint(); return; }
+    if (n.kind === 'page' && !multi.has(n)) multi.clear();
+    select(n); updateHint();
+  }
+  function finishMarquee(shift) {
+    const x0 = Math.min(marquee.x0, marquee.x1), x1 = Math.max(marquee.x0, marquee.x1), y0 = Math.min(marquee.y0, marquee.y1), y1 = Math.max(marquee.y0, marquee.y1);
+    if (!shift) multi.clear();
+    for (const n of activeNodes) {
+      if (n.kind !== 'page' || (isChild(n) && depthF < 0.5)) continue;
+      const [sx, sy] = toScreen(n.x, n.y);
+      if (sx >= x0 && sx <= x1 && sy >= y0 && sy <= y1) multi.add(n);
+    }
+    if (multi.size === 1) select([...multi][0], { noZoom: true });
+    else if (multi.size > 1 && selected && !multi.has(selected)) clearSelection();
+    updateHint();
+  }
+  function releaseAll() {
+    pages.forEach(n => { if (n.pinned) { n.pinned = false; if (n !== selected) { n.fx = null; n.fy = null; } } });
+    sim.alpha(0.5).restart(); updateHint();
+  }
+  function setMode(m) { mode = m; canvas.classList.toggle('select', m === 'select'); document.querySelectorAll('.tool-mode').forEach(b => b.classList.toggle('on', b.dataset.mode === m)); updateHint(); }
   canvas.addEventListener('pointermove', e => {
+    if (drag) {
+      const dx = (e.clientX - drag.sx) / k, dy = (e.clientY - drag.sy) / k;
+      if (!drag.moved && Math.hypot(e.clientX - drag.sx, e.clientY - drag.sy) >= 3) drag.moved = true;
+      if (!drag.moved) return;
+      drag.nodes.forEach(({ n, x, y }) => { n.fx = n.x = x + dx; n.fy = n.y = y + dy; n.vx = n.vy = 0; });
+      if (sim.alpha() < 0.12) sim.alpha(0.12).restart();   // let synapses, sources and sub-neurons follow their neuron
+      return;
+    }
+    if (marquee) { marquee.x1 = e.clientX; marquee.y1 = e.clientY; return; }
     if (downAt) return;
     const n = pick(e.clientX, e.clientY);
     if (n !== hover) {
@@ -500,10 +632,16 @@
 
   const panel = document.getElementById('panel'), panelBody = document.getElementById('panel-body');
   document.getElementById('panel-close').addEventListener('click', clearSelection);
-  window.addEventListener('keydown', e => { if (e.key === 'Escape') { clearSelection(); hideResults(); } });
+  window.addEventListener('keydown', e => {
+    if (e.target.closest('input')) return;
+    if (e.key === 'Escape') { clearSelection(); hideResults(); multi.clear(); marquee = null; updateHint(); }
+    else if (e.key === 'v' || e.key === 'V') setMode('select');
+    else if (e.key === 'h' || e.key === 'H') setMode('pan');
+    else if (e.key === 'r' || e.key === 'R') releaseAll();
+  });
 
   function select(n, opts = {}) {
-    if (selected && selected.kind === 'page') { selected.fx = null; selected.fy = null; }
+    if (selected && selected.kind === 'page' && !selected.pinned) { selected.fx = null; selected.fy = null; }
     selected = n; pulseSyn = null;
     if (n.kind === 'page' && !isChild(n)) { n.fx = n.x; n.fy = n.y; }   // sub-neurons stay free so they can reach their ring slot
     if (n.kind === 'page') {
@@ -526,7 +664,7 @@
     renderPanel(n); panel.hidden = false;
     if (n.kind === 'page' && history.replaceState) history.replaceState(null, '', '#n=' + encodeURIComponent(n.id));
   }
-  function clearSelection() { if (selected && selected.kind === 'page') { selected.fx = null; selected.fy = null; } selected = null; pulseSyn = null; panel.hidden = true; }
+  function clearSelection() { if (selected && selected.kind === 'page' && !selected.pinned) { selected.fx = null; selected.fy = null; } selected = null; pulseSyn = null; panel.hidden = true; }
 
   function renderPanel(n) {
     const col = lobeColor(n);
@@ -536,6 +674,7 @@
       h += `<h2>${esc(n.title)}</h2><p class="desc">${esc(n.desc || n.intro)}</p>`;
       h += `<div class="meta">${n.updated ? `<span>updated ${n.updated}</span>` : ''}<span>${n.nSyn} synapses</span><span>${n.neighbors.length} connections</span><span>${n.srcNodes.length} sources</span></div>`;
       const ob = otherBrains(n.id);
+      if (brainsIn && n.brain && N && !ob.length) { const b = N.brains.find(x => x.id === n.brain); if (b) h += `<h3>Brain</h3><ul><li class="nb net"><a href="${esc(b.href)}#n=${encodeURIComponent(n.orig || n.id)}"><span class="sw" style="background:${esc(b.color)}"></span><span class="t">Open in the ${esc(b.title)} brain<span class="note">this neuron belongs to ${esc(b.title)} → open</span></span></a></li></ul>`; }
       if (ob.length) h += `<h3>Shared across the network</h3><ul>` + ob.map(b => `<li class="nb net"><a href="${esc(b.href)}#n=${encodeURIComponent(n.id)}"><span class="sw" style="background:${esc(b.color)}"></span><span class="t">Same neuron in ${esc(b.title)}<span class="note">${b.synapses} synapses · ${b.connections} connections there → open</span></span></a></li>`).join('') + `</ul>`;
       if (n.parent) h += `<h3>Part of</h3><ul><li class="nb" data-id="${esc(n.parent.id)}"><span class="sw" style="background:${lobeColor(n.parent)}"></span><span class="t">${esc(n.parent.title)}<span class="note">parent neuron</span></span></li></ul>`;
       if (n.children.length) h += `<h3>Sub-neurons <span>${n.children.length}</span></h3><ul>` + n.children.map(c => `<li class="nb" data-id="${esc(c.id)}"><span class="sw" style="background:${lobeColor(c)}"></span><span class="t">${esc(c.title)}<span class="note">${esc(c.desc || '')}</span></span><span class="w">${c.nSyn}</span></li>`).join('') + `</ul>`;
@@ -612,12 +751,29 @@
   document.getElementById('z-in').addEventListener('click', () => d3.select(canvas).transition().duration(350).call(zoom.scaleBy, 1.6));
   document.getElementById('z-out').addEventListener('click', () => d3.select(canvas).transition().duration(350).call(zoom.scaleBy, 1 / 1.6));
   document.getElementById('z-fit').addEventListener('click', () => { clearSelection(); fitAll(); });
+  // tool buttons live above the zoom controls; injected so every brain page gets them without markup changes
+  const tools = document.createElement('div'); tools.id = 'tools'; tools.className = 'zoom-ctl tools'; tools.setAttribute('role', 'group'); tools.setAttribute('aria-label', 'Tools');
+  tools.innerHTML = `<button class="tool-mode on" data-mode="select" title="Select & move (V): drag a box to select neurons, drag neurons to move them; mouse3 or Space pans" aria-label="Select and move tool">⬚</button>
+    <button class="tool-mode" data-mode="pan" title="Pan (H): drag to pan the view" aria-label="Pan tool">✋</button>
+    <button id="release-pins" title="Release hand-placed neurons (R)" aria-label="Release hand-placed neurons">⟲</button>`;
+  document.getElementById('zoom-ctl').before(tools);
+  tools.querySelectorAll('.tool-mode').forEach(b => b.addEventListener('click', () => setMode(b.dataset.mode)));
+  document.getElementById('release-pins').addEventListener('click', releaseAll);
+  canvas.classList.add('select');
   const levelText = document.getElementById('level-text'), levelDot = document.querySelector('#level .dot'), hint = document.getElementById('hint');
   function updateLevel() {
     const lvl = forceExplode || k >= 1.5 ? 'Synapses' : hasSubs && k >= 0.85 ? 'Sub-neurons' : k >= 0.6 ? 'Neurons' : 'Lobes';
     levelText.textContent = lvl + ` · ${k.toFixed(1)}×`;
     const c = lvl === 'Synapses' ? '#ffffff' : lvl === 'Sub-neurons' ? '#fbbf24' : lvl === 'Neurons' ? '#ff8a3d' : '#4fd1c5';
     levelDot.style.background = c; levelDot.style.boxShadow = `0 0 12px ${c}`;
+    updateHint(lvl);
+  }
+  function updateHint(lvl) {
+    lvl = lvl || (forceExplode || k >= 1.5 ? 'Synapses' : hasSubs && k >= 0.85 ? 'Sub-neurons' : k >= 0.6 ? 'Neurons' : 'Lobes');
+    const pinned = pages.filter(n => n.pinned).length;
+    if (multi.size > 1) { hint.textContent = `${multi.size} neurons selected · drag one to move them all · Shift+click adds · Esc clears${pinned ? ' · R releases pins' : ''}`; return; }
+    if (pinned && lvl === 'Lobes') { hint.textContent = `${plural(pinned, 'neuron')} placed by hand · R releases them`; return; }
+    if (lvl === 'Lobes') { hint.textContent = mode === 'select' ? 'scroll to zoom · drag to select · mouse3 or Space to pan · drag a neuron to move it' : 'scroll to zoom · drag to pan · click a neuron · V for select mode'; return; }
     hint.textContent = lvl === 'Lobes' ? 'scroll to zoom · drag to pan · click a neuron' : lvl === 'Neurons' ? (hasSubs ? 'keep zooming: sub-neurons unfold at 0.85×, synapses at 1.5×' : 'keep zooming: synapses explode at 1.5×') : lvl === 'Sub-neurons' ? 'small satellites are sub-neurons · zoom past 1.5× to explode synapses' : 'dots are synapses · diamonds are sources · dashed lines fire across neurons';
   }
   function updateStats() {
@@ -662,8 +818,11 @@
   // initial transform: fit
   (() => {
     const vp = pages.filter(p => visible(p) && !isChild(p));
-    const xs = vp.map(p => p.x), ys = vp.map(p => p.y);
-    const minX = Math.min(...xs) - 150, maxX = Math.max(...xs) + 150, minY = Math.min(...ys) - 170, maxY = Math.max(...ys) + 170;
+    // on the network screen the lobes keep drifting outwards for a while, so fit the planned anchors rather than the live positions
+    const pts = brainsIn ? Object.values(anchor) : vp;
+    const xs = pts.map(p => p.x), ys = pts.map(p => p.y);
+    const mx = brainsIn ? 760 : 150, my = brainsIn ? 420 : 170;
+    const minX = Math.min(...xs) - mx, maxX = Math.max(...xs) + mx, minY = Math.min(...ys) - my, maxY = Math.max(...ys) + my;
     const padL = window.innerWidth <= 900 ? 0 : 230;
     const kk = Math.min((W - 60 - padL) / (maxX - minX), (H - 200) / (maxY - minY)) * 0.96;
     const tx = padL + (W - padL) / 2 - (minX + maxX) / 2 * kk, ty = H / 2 + 12 - (minY + maxY) / 2 * kk;
@@ -678,4 +837,6 @@
   const openHash = () => { const m = /[#&]n=([^&]+)/.exec(location.hash); if (!m) return; const n = pageById[decodeURIComponent(m[1])]; if (n) { ensureVisible(n); select(n); } };
   setTimeout(openHash, 1700);
   window.addEventListener('hashchange', openHash);
+  // read-only hooks for the QA scripts in tools/ (screen position of a neuron, current marquee selection)
+  window.MINDBLOWN_QA = { screenOf: id => { const n = pageById[id]; return n ? toScreen(n.x, n.y) : null; }, selection: () => [...multi].map(n => n.id), pinned: () => pages.filter(n => n.pinned).map(n => n.id), mode: () => mode };
 })();
