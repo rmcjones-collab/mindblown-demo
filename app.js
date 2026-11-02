@@ -269,7 +269,7 @@
         ctx.font = `500 ${sw(Math.min(W / 32, 12))}px 'Satoshi', sans-serif`;
         ctx.fillStyle = rgba('#a7b2cc', 0.8 * lobeVis);
         const subs = ps.filter(isChild).length;
-        ctx.fillText(`${ps.length - subs} neurons${subs ? ` · ${subs} sub-neurons` : ''} · ${d3.sum(ps, p => p.nSyn)} synapses`, ax, top ? ay : ay + lh);
+        ctx.fillText(`${plural(ps.length - subs, 'neuron')}${subs ? ` · ${plural(subs, 'sub-neuron')}` : ''} · ${plural(d3.sum(ps, p => p.nSyn), 'synapse')}`, ax, top ? ay : ay + lh);
         ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic';
       });
     }
@@ -487,6 +487,8 @@
   }
   const srcKind = n => ({ session: 'Perplexity session', github: D.demo ? 'Code host (demo)' : 'GitHub', web: 'Web source', gmail: 'Gmail (metadata)', calendar: 'Google Calendar', spotify: 'Spotify', plaid: 'Bank data (names only)', memory: 'Memory note', wiki: 'Brain page' }[n.kindOf] || 'Source');
   const typeName = n => esc({ project: 'project', entity: 'person / thing', person: 'person', place: 'place', habit: 'habit', event: 'event', account: 'account', trip: 'trip', preference: 'preference', day: D.dayName || 'dream log', audit: 'audit' }[n.type] || n.type || '');
+  const pw = (n, w) => w + (n === 1 ? '' : 's');
+  const plural = (n, w) => `${n} ${pw(n, w)}`;
   const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 
   const panel = document.getElementById('panel'), panelBody = document.getElementById('panel-body');
@@ -611,7 +613,7 @@
   function updateStats() {
     const vp = pages.filter(visible);
     const subs = vp.filter(isChild).length;
-    document.getElementById('stats').innerHTML = `<b>${vp.length - subs}</b> neurons${subs ? ` · <b>${subs}</b> sub-neurons` : ''} · <b>${d3.sum(vp, p => p.nSyn)}</b> synapses<br><b>${activeLinks.filter(l => l.kind === 'pp').length}</b> connections · <b>${srcs.filter(visible).length}</b> sources`;
+    document.getElementById('stats').innerHTML = `<b>${vp.length - subs}</b> ${pw(vp.length - subs, 'neuron')}${subs ? ` · <b>${subs}</b> ${pw(subs, 'sub-neuron')}` : ''} · <b>${d3.sum(vp, p => p.nSyn)}</b> ${pw(d3.sum(vp, p => p.nSyn), 'synapse')}<br><b>${activeLinks.filter(l => l.kind === 'pp').length}</b> ${pw(activeLinks.filter(l => l.kind === 'pp').length, 'connection')} · <b>${srcs.filter(visible).length}</b> ${pw(srcs.filter(visible).length, 'source')}`;
   }
 
   // ---------- search ----------

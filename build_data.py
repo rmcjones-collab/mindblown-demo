@@ -15,11 +15,31 @@ MDLINK = re.compile(r"\[([^\]]+)\]\((https?://[^)]+)\)")
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 # Lobe rules live in lobes.json so the same extractor works on any Brain:
-# {"center": page id, "default": lobe id, "lobes": [{"id","name","color","match":[id substrings],"hidden":bool}]}
+# {"center": page id, "default": lobe id, "lobes": [{"id","name","color","match":[id substrings],"hidden":bool}],
+#  "parents": [{"parent": page id, "match": [id prefixes]}]}  -- optional: matching pages become sub-neurons of parent
 _cfg = json.load(open(os.path.join(HERE, "lobes.json"), encoding="utf-8"))
 LOBES = [(l["id"], l["name"], l["color"], l["match"], l.get("hidden", False)) for l in _cfg["lobes"]]
 CENTER = _cfg.get("center", "")
 DEFAULT_LOBE = _cfg.get("default", LOBES[0][0])
+PARENTS = [(r["parent"], r["match"]) for r in _cfg.get("parents", [])]
+# Optional scoping and enrichment (all keys optional):
+#  "include": [id substrings]  -- keep only matching wiki pages (a focused brain such as one product)
+#  "title", "subtitle", "dayName" -- header overrides passed through to the renderer
+#  "session_titles": path       -- JSON {session uuid: title | {title,...}} used to label pplx://sessions sources
+#  "extras": path               -- JSON {pages[], sources[], links[]} merged in (repos, trails, ...);
+#                                  extra pages carry inline synapses [{lead,text,section?,links[],cites[]}]
+INCLUDE = _cfg.get("include") or []
+HEADER = {k: _cfg[k] for k in ("title", "subtitle", "dayName") if _cfg.get(k)}
+SESSION_TITLES = json.load(open(os.path.join(HERE, _cfg["session_titles"]), encoding="utf-8")) if _cfg.get("session_titles") else {}
+EXTRAS = json.load(open(os.path.join(HERE, _cfg["extras"]), encoding="utf-8")) if _cfg.get("extras") else {}
+
+
+def parent_for(pid):
+    """Return the parent page id for a sub-neuron, or None for a top-level page."""
+    for parent, pats in PARENTS:
+        if pid != parent and any(pid.startswith(p) for p in pats):
+            return parent
+    return None
 
 
 def lobe_for(pid):
@@ -66,8 +86,38 @@ files = []
 for sub in ["projects", "entities", "preferences", "learnings", "artifacts"]:
     files += sorted(glob.glob(os.path.join(ROOT, sub, "*.md")))
 
+def source_for(uri):
+    """Create (or fetch) the source record for a citation URI."""
+    if uri in sources:
+        return sources[uri]
+    label, kind = uri, "session"
+    if uri.startswith("pplx://sessions/"):
+        sid = uri.split("/")[-1]
+        t = SESSION_TITLES.get(sid)
+        if isinstance(t, dict):  # {title, first, last} records are accepted too
+            t = t.get("title")
+        label = (t or sid[:8]).strip()
+        if len(label) > 56:
+            label = label[:55].rstrip() + "…"
+    elif "github.com" in uri:
+        kind = "github"
+        parts = uri.split("/")
+        label = "/".join(parts[3:5])
+        if "/pull/" in uri:
+            label += " #" + uri.rsplit("/", 1)[-1]
+        elif "/commit/" in uri:
+            label += " @" + uri.rsplit("/", 1)[-1][:7]
+    else:
+        kind = "web"
+        label = uri.split("/")[2] if "://" in uri else uri
+    sources[uri] = dict(id=uri, label=label, kind=kind, pages=[])
+    return sources[uri]
+
+
 for path in files:
     rel = os.path.relpath(path, ROOT)[:-3]
+    if INCLUDE and not any(p in rel for p in INCLUDE):
+        continue
     raw = open(path, encoding="utf-8").read()
     fm, body = parse_frontmatter(raw)
     pid = fm.get("id", rel)
@@ -96,7 +146,7 @@ for path in files:
     if not desc:
         desc = intro[:260]
 
-    page = dict(id=pid, title=title, type=stype, lobe=lobe_for(pid), desc=desc, intro=intro,
+    page = dict(id=pid, title=title, type=stype, lobe=lobe_for(pid), parent=parent_for(pid), desc=desc, intro=intro,
                 created=fm.get("created_at", "")[:10], updated=fm.get("updated_at", "")[:10],
                 synapses=[], sources=[], sections=[])
     pages[pid] = page
@@ -139,19 +189,37 @@ for path in files:
         if not uri:
             continue
         page["sources"].append(uri)
-        if uri not in sources:
-            label = uri
-            kind = "session"
-            if uri.startswith("pplx://sessions/"):
-                label = uri.split("/")[-1][:8]
-            elif "github.com" in uri:
-                kind = "github"
-                label = "/".join(uri.split("/")[3:5]) + (" #" + uri.rsplit("/", 1)[-1] if "/pull/" in uri else "")
-            else:
-                kind = "web"
-                label = uri.split("/")[2]
-            sources[uri] = dict(id=uri, label=label, kind=kind, pages=[])
-        sources[uri]["pages"].append(pid)
+        source_for(uri)["pages"].append(pid)
+
+# extra neurons from outside the wiki (repositories, session trails, ...)
+for xs in EXTRAS.get("sources", []):
+    sources.setdefault(xs["id"], dict(id=xs["id"], label=xs["label"], kind=xs.get("kind", "web"), pages=[]))
+for xp in EXTRAS.get("pages", []):
+    pid = xp["id"]
+    page = dict(id=pid, title=xp["title"], type=xp.get("type", "note"), lobe=xp.get("lobe") or lobe_for(pid),
+                parent=xp.get("parent") or parent_for(pid), desc=clean(xp.get("desc", "")), intro=clean(xp.get("intro", xp.get("desc", ""))),
+                created=xp.get("created", ""), updated=xp.get("updated", ""), synapses=[], sources=[], sections=[])
+    pages[pid] = page
+    page_cites = []
+    for i, xsyn in enumerate(xp.get("synapses", []), 1):
+        sid = f"{pid}#{i}"
+        cites = [c for c in xsyn.get("cites", [])]
+        syn = dict(id=sid, page=pid, lead=clean(xsyn["lead"]), text=clean(xsyn.get("text", ""))[:420],
+                   section=xsyn.get("section", "Intro"), links=list(xsyn.get("links", [])), cites=cites)
+        synapses.append(syn)
+        page["synapses"].append(sid)
+        if syn["section"] not in page["sections"]:
+            page["sections"].append(syn["section"])
+        for l in syn["links"]:
+            edges.append(dict(s=sid, t=l, kind="syn-link", w=1))
+        for c in cites:
+            if c not in page_cites:
+                page_cites.append(c)
+    for uri in page_cites:
+        page["sources"].append(uri)
+        source_for(uri)["pages"].append(pid)
+    for l in xp.get("links", []):
+        edges.append(dict(s=pid, t=l["t"], kind=l.get("kind", "see-also"), w=l.get("w", 2), note=l.get("note", "")))
 
 # resolve edges: drop dangling targets, dedupe page-page, weight
 valid = set(pages)
@@ -197,7 +265,8 @@ data = dict(
     links=links_out,
     synLinks=syn_edges,
     cocite=cocite_out,
-    built="2026-11-01",
+    built=__import__("datetime").date.today().isoformat(),
+    **HEADER,
 )
 with open(OUT, "w", encoding="utf-8") as f:
     f.write("window.MINDBLOWN = ")
