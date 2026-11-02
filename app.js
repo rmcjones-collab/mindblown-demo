@@ -218,18 +218,22 @@
   const toWorld = (sx, sy) => [(sx - tx) / k, (sy - ty) / k];
   const toScreen = (x, y) => [x * k + tx, y * k + ty];
 
-  function fitAll(dur = 900) {
+  // the transform that shows the whole brain: data-space margins for the lobe rings, plus screen-space room for the lobe titles,
+  // which are drawn at a fixed pixel size and on the network screen sit outside the rings
+  function fitTransform() {
     const vp = pages.filter(p => visible(p) && !isChild(p));
-    // on the network screen the lobes keep drifting outwards for a while, so fit the planned anchors rather than the live positions
-    const pts = brainsIn ? Object.values(anchor) : vp;
-    const xs = pts.map(p => p.x), ys = pts.map(p => p.y);
-    const mx = brainsIn ? 760 : 150, my = brainsIn ? 420 : 170;
+    const xs = vp.map(p => p.x), ys = vp.map(p => p.y);
+    const mx = brainsIn ? 260 : 150, my = brainsIn ? 260 : 170;
     const minX = Math.min(...xs) - mx, maxX = Math.max(...xs) + mx, minY = Math.min(...ys) - my, maxY = Math.max(...ys) + my;
     const padL = window.innerWidth <= 900 ? 0 : 230; // keep the fitted brain clear of the lobes legend on desktop
-    const kk = Math.min((W - 60 - padL) / (maxX - minX), (H - 200) / (maxY - minY)) * 0.96;
+    const lx = brainsIn ? Math.min(210, W * 0.16) : 0, ly = brainsIn ? 30 : 0;   // pixels reserved for titles beside/above the outer lobes
+    const kk = Math.min((W - 60 - padL - 2 * lx) / (maxX - minX), (H - (brainsIn ? 150 : 200) - 2 * ly) / (maxY - minY)) * 0.96;
     const cx = (minX + maxX) / 2, cy = (minY + maxY) / 2;
-    const t = d3.zoomIdentity.translate(padL + (W - padL) / 2 - cx * kk, H / 2 + 12 - cy * kk).scale(kk);
-    d3.select(canvas).transition().duration(dur).ease(d3.easeCubicInOut).call(zoom.transform, t);
+    return { kk, tx: padL + (W - padL) / 2 - cx * kk, ty: H / 2 + 12 - cy * kk };
+  }
+  function fitAll(dur = 900) {
+    const { kk, tx, ty } = fitTransform();
+    d3.select(canvas).transition().duration(dur).ease(d3.easeCubicInOut).call(zoom.transform, d3.zoomIdentity.translate(tx, ty).scale(kk));
   }
   function zoomTo(n, kk, dur = 1100) {
     const mobile = window.innerWidth <= 900;
@@ -307,10 +311,17 @@
       const placed = [];   // screen-space label boxes already drawn this frame, so lobe titles never stack on each other
       const hitsBox = b => placed.some(q => b.x < q.x + q.w && b.x + b.w > q.x && b.y < q.y + q.h && b.y + b.h > q.y);
       const hitsCircle = (b, self) => circles.some(c => c !== self && Math.hypot(Math.max(b.x, Math.min(c.sx, b.x + b.w)) - c.sx, Math.max(b.y, Math.min(c.sy, b.y + b.h)) - c.sy) < c.sr * 0.9);
+      // the screen area a title may use: right of the lobes legend, below the header, above the hint bar
+      const edge = { x0: window.innerWidth <= 900 ? 8 : 238, x1: W - 8, y0: 78, y1: H - 70 };
+      const offEdge = b => Math.max(0, edge.x0 - b.x) + Math.max(0, b.x + b.w - edge.x1) + Math.max(0, edge.y0 - b.y) + Math.max(0, b.y + b.h - edge.y1);
+      // when every candidate collides, take the one that overlaps least rather than the first
+      const penalty = (b, self) => offEdge(b) * 3
+        + placed.reduce((a, q) => a + Math.max(0, Math.min(b.x + b.w, q.x + q.w) - Math.max(b.x, q.x)) * Math.max(0, Math.min(b.y + b.h, q.y + q.h) - Math.max(b.y, q.y)) / 40, 0)
+        + circles.reduce((a, c) => a + (c === self ? 0 : Math.max(0, c.sr * 0.9 - Math.hypot(Math.max(b.x, Math.min(c.sx, b.x + b.w)) - c.sx, Math.max(b.y, Math.min(c.sy, b.y + b.h)) - c.sy))), 0);
       circles.forEach(c => {
         const { l, ps, cx, cy, rr } = c;
         // network screen: lobe titles shrink as the view zooms out so a dozen lobes can share one screen
-        const shrink = brainsIn ? Math.min(1, Math.max(0.62, k / 0.34)) : 1;
+        const shrink = brainsIn ? Math.min(1, Math.max(0.5, k / 0.3)) : 1;
         const fs = Math.min(W / (brainsIn ? 36 : 22), 13 + Math.sqrt(ps.length) * 2.4) * shrink, fs2 = Math.max(9.5, Math.min(W / 32, 12) * shrink);
         ctx.beginPath(); ctx.arc(cx, cy, rr, 0, Math.PI * 2);
         ctx.fillStyle = rgba(l.color, 0.05 * lobeVis); ctx.fill();
@@ -323,7 +334,7 @@
         ctx.font = `600 ${fs}px 'Clash Display', 'Satoshi', sans-serif`; const w1 = ctx.measureText(l.name).width;
         ctx.font = `500 ${fs2}px 'Satoshi', sans-serif`; const w2 = ctx.measureText(line2).width;
         const bw = Math.max(w1, w2), bh = fs + fs2 + 10;
-        let best = null;
+        let best = null, bestPen = Infinity;
         const tries = [0, 0.5, -0.5, 1, -1, 1.5, -1.5, 2, -2, 2.5, -2.5, Math.PI].flatMap(da => [[da, 14], [da, 14 + bh], [da, 14 + 2 * bh]]);   // walk the ring, then rings further out
         tries.sort((p, q) => (Math.abs(p[0]) + p[1] / 40) - (Math.abs(q[0]) + q[1] / 40));
         for (const [da, off] of tries) {
@@ -332,8 +343,8 @@
           const align = Math.abs(ux) < 0.35 ? 'center' : ux > 0 ? 'left' : 'right';
           const bx = align === 'center' ? sx - bw / 2 : align === 'left' ? sx : sx - bw, by = uy < -0.35 ? sy - bh : uy > 0.35 ? sy : sy - bh / 2;
           const box = { x: bx, y: by, w: bw, h: bh, sx, sy, align };
-          if (!best) best = box;
-          if (!hitsBox(box) && !hitsCircle(box, c)) { best = box; break; }
+          if (!hitsBox(box) && !hitsCircle(box, c) && !offEdge(box)) { best = box; break; }
+          const pen = penalty(box, c); if (pen < bestPen) { bestPen = pen; best = box; }
         }
         placed.push(best);
         ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
@@ -817,15 +828,7 @@
   updateStats();
   // initial transform: fit
   (() => {
-    const vp = pages.filter(p => visible(p) && !isChild(p));
-    // on the network screen the lobes keep drifting outwards for a while, so fit the planned anchors rather than the live positions
-    const pts = brainsIn ? Object.values(anchor) : vp;
-    const xs = pts.map(p => p.x), ys = pts.map(p => p.y);
-    const mx = brainsIn ? 760 : 150, my = brainsIn ? 420 : 170;
-    const minX = Math.min(...xs) - mx, maxX = Math.max(...xs) + mx, minY = Math.min(...ys) - my, maxY = Math.max(...ys) + my;
-    const padL = window.innerWidth <= 900 ? 0 : 230;
-    const kk = Math.min((W - 60 - padL) / (maxX - minX), (H - 200) / (maxY - minY)) * 0.96;
-    const tx = padL + (W - padL) / 2 - (minX + maxX) / 2 * kk, ty = H / 2 + 12 - (minY + maxY) / 2 * kk;
+    const { kk, tx, ty } = fitTransform();
     d3.select(canvas).call(zoom.transform, d3.zoomIdentity.translate(tx, ty).scale(kk * 0.6));
     d3.select(canvas).transition().duration(1600).ease(d3.easeCubicOut).call(zoom.transform, d3.zoomIdentity.translate(tx, ty).scale(kk));
   })();
