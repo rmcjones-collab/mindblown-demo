@@ -329,7 +329,7 @@
     $('cats-n').textContent = cats.length;
     catList.innerHTML = cats.map(c => {
       const ns = subsOf(c.id).length, ne = brain.entries.filter(e => e.cat === c.id).length;
-      return `<button class="lobe${c.enabled ? '' : ' off'}" data-id="${esc(c.id)}" title="${c.enabled ? 'Open' : 'Questions off · open'}"><span class="sw" style="background:${c.color};color:${c.color}"></span><span>${esc(c.name)}</span>${brain.interests.includes(c.id) ? '<span class="star">★</span>' : '<span></span>'}<span class="n">${ns ? `${ns}·${ne}` : '—'}</span></button>`;
+      return `<button class="lobe${c.enabled ? '' : ' off'}" data-id="${esc(c.id)}" title="${c.enabled ? 'Open' : 'Questions off · open'}"><span class="sw" style="background:${c.color};color:${c.color}"></span><span>${esc(c.name)}</span>${brain.interests.includes(c.id) ? '<span class="star">★</span>' : '<span></span>'}<span class="n">${ne ? `${ns}·${ne}` : ns ? `${ns}` : '—'}</span></button>`;
     }).join('');
     catList.querySelectorAll('.lobe').forEach(b => b.addEventListener('click', () => selectCat(b.dataset.id)));
   }
@@ -688,11 +688,12 @@
       const pts = subNodes.length > 1 ? subNodes : [{ x: 0, y: 0 }];
       const xs = pts.map(p => p.x), ys = pts.map(p => p.y);
       const empties = Object.values(anchor); xs.push(...empties.map(a => a.x)); ys.push(...empties.map(a => a.y));
-      const padX = mobile() ? 150 : 160, padY = mobile() ? 170 : 150;
+      const padX = mobile() ? 150 : 140, padY = mobile() ? 170 : 150;
       const minX = Math.min(...xs) - padX, maxX = Math.max(...xs) + padX, minY = Math.min(...ys) - padY, maxY = Math.max(...ys) + padY;
-      const padL = mobile() ? 0 : 430, padR = mobile() ? 0 : 260;
+      const padL = mobile() ? 0 : 410, padR = mobile() ? 0 : 340; // interview card on the left, categories list on the right
       const availH = mobile() ? H * 0.62 - 150 : H - 200;
-      const kk = Math.min((W - padL - padR - 40) / (maxX - minX), availH / (maxY - minY));
+      const labelRoom = mobile() ? 40 : 300; // screen-space allowance for the radial labels on the ring's left and right
+      const kk = Math.min((W - padL - padR - labelRoom) / (maxX - minX), availH / (maxY - minY));
       const cx = (minX + maxX) / 2, cy = (minY + maxY) / 2;
       const t = d3.zoomIdentity.translate(padL + (W - padL - padR) / 2 - cx * kk, (mobile() ? (90 + H * 0.62) / 2 : H / 2 + 10) - cy * kk).scale(Math.max(0.12, kk));
       d3.select(canvas).transition().duration(dur).ease(d3.easeCubicInOut).call(zoom.transform, t);
@@ -775,9 +776,11 @@
       // category halos (also the places empty categories live)
       halos = [];
       ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      let li = 0;
       brain.cats.forEach(c => {
         if (c.id === 'you') return;
         const ps = subNodes.filter(p => p.cat === c.id); const a = anchor[c.id]; if (!a && !ps.length) return;
+        const stagger = (li++ % 2) * sw(22); // alternate label radii so neighbours do not collide at the top and bottom of the ring
         const cx = ps.length ? d3.mean(ps, p => p.x) : a.x, cy = ps.length ? d3.mean(ps, p => p.y) : a.y;
         const rr = ps.length ? Math.max(48, d3.quantile(ps.map(p => Math.hypot(p.x - cx, p.y - cy)).sort(d3.ascending), 0.92) + 46 + explodeF * 30) : 46;
         halos.push({ kind: 'halo', cat: c.id, x: cx, y: cy, r: rr, count: ps.length });
@@ -791,9 +794,10 @@
         const dl = Math.hypot(cx, cy) || 1, ux = cx / dl, uy = cy / dl;
         const fs = mobile() ? 10.5 + Math.sqrt(ps.length) * 1.6 : Math.min(W / 24, 12.5 + Math.sqrt(ps.length) * 2.2);
         if (mobile() && !ps.length && k < 0.4) return; // too dense on phones: empty rings stay anonymous until you zoom or open the list
-        const showSub = !(mobile() && !ps.length && k < 0.6);
+        const showSub = !(!ps.length && k < (mobile() ? 0.6 : 0.42));
         const m = mobile();
-        const ax = m ? cx : cx + ux * (rr + sw(12)), ay = m ? cy + (uy < 0 ? -1 : 1) * (rr + sw(10)) : cy + uy * (rr + sw(12)), lh = sw(fs + 5);
+        const off = rr + sw(12) + (k < 0.6 ? stagger : 0);
+        const ax = m ? cx : cx + ux * off, ay = m ? cy + (uy < 0 ? -1 : 1) * (rr + sw(10) + (k < 0.6 ? stagger : 0)) : cy + uy * off, lh = sw(fs + 5);
         ctx.textAlign = m || Math.abs(ux) < 0.1 ? 'center' : ux > 0 ? 'left' : 'right';
         const top = uy < 0;
         ctx.font = `600 ${sw(fs)}px 'Clash Display', 'Satoshi', sans-serif`; ctx.fillStyle = rgba(c.color, 0.9 * v);
