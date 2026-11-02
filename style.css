@@ -173,3 +173,8 @@ input { font: inherit; }
 .brains a:hover { color: var(--text); }
 .brains a.on { color: #0b0e14; background: var(--text); }
 @media (max-width: 900px) { .brains { margin-left: 8px; } .brains a { padding: 5px 9px; } }
+
+/* network: shared-neuron jump rows in the panel */
+.nb.net { display: block; padding: 0; }
+.nb.net a { display: grid; grid-template-columns: 10px 1fr; gap: 10px; align-items: baseline; padding: 7px 10px; color: inherit; text-decoration: none; }
+.nb.net .note { color: var(--accent); }

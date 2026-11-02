@@ -1,6 +1,10 @@
 /* MindBlown — explode the Brain into lobes, neurons and synapses. */
 (() => {
   const D = window.MINDBLOWN;
+  // optional network layer: other brains that share neuron ids with this one (see build_network.py in a network repo)
+  const N = window.MINDBLOWN_NETWORK || null;
+  const otherBrains = id => (N && N.shared && N.shared[id]) ? N.brains.filter(b => b.id !== D.brain && N.shared[id][b.id]).map(b => ({ ...b, ...N.shared[id][b.id] })) : [];
+  const isShared = n => n.kind === 'page' && otherBrains(n.id).length > 0;
   if (D.demo) { const sub = document.querySelector('.brand .sub'); if (sub) sub.textContent = 'demo brain · fictional data'; document.title = 'MindBlown — demo brain'; }
   if (D.subtitle) { const sub = document.querySelector('.brand .sub'); if (sub) sub.textContent = D.subtitle; }
   if (D.title) { document.title = D.title; const h = document.querySelector('.brand .title'); if (h) h.textContent = D.title; }
@@ -404,6 +408,8 @@
       // body
       ctx.fillStyle = rgba(col, 0.95 * a); ctx.beginPath(); ctx.arc(n.x, n.y, r, 0, Math.PI * 2); ctx.fill();
       ctx.fillStyle = rgba('#ffffff', 0.55 * a); ctx.beginPath(); ctx.arc(n.x - r * 0.25, n.y - r * 0.25, r * 0.32, 0, Math.PI * 2); ctx.fill();
+      // shared neuron: a thin dashed white ring marks ids that also exist in another brain of the network
+      if (N && isShared(n)) { ctx.strokeStyle = rgba('#ffffff', 0.45 * a); ctx.lineWidth = sw(0.9); ctx.setLineDash([sw(2.5), sw(2.5)]); ctx.beginPath(); ctx.arc(n.x, n.y, r + sw(3.5), 0, Math.PI * 2); ctx.stroke(); ctx.setLineDash([]); }
       // folded sub-neurons: small satellites hugging the body until the depth level unfolds them
       if (n.children.length && depthF < 0.97) {
         const m = n.children.length, rr = r + sw(10);
@@ -518,6 +524,7 @@
     }
     else if (!opts.noZoom) zoomTo(n, Math.max(k, 3));
     renderPanel(n); panel.hidden = false;
+    if (n.kind === 'page' && history.replaceState) history.replaceState(null, '', '#n=' + encodeURIComponent(n.id));
   }
   function clearSelection() { if (selected && selected.kind === 'page') { selected.fx = null; selected.fy = null; } selected = null; pulseSyn = null; panel.hidden = true; }
 
@@ -528,6 +535,8 @@
       h += `<div class="kind"><span class="sw" style="background:${col};color:${col}"></span>${typeName(n)} · ${esc(lobeById[n.lobe].name)}</div>`;
       h += `<h2>${esc(n.title)}</h2><p class="desc">${esc(n.desc || n.intro)}</p>`;
       h += `<div class="meta">${n.updated ? `<span>updated ${n.updated}</span>` : ''}<span>${n.nSyn} synapses</span><span>${n.neighbors.length} connections</span><span>${n.srcNodes.length} sources</span></div>`;
+      const ob = otherBrains(n.id);
+      if (ob.length) h += `<h3>Shared across the network</h3><ul>` + ob.map(b => `<li class="nb net"><a href="${esc(b.href)}#n=${encodeURIComponent(n.id)}"><span class="sw" style="background:${esc(b.color)}"></span><span class="t">Same neuron in ${esc(b.title)}<span class="note">${b.synapses} synapses · ${b.connections} connections there → open</span></span></a></li>`).join('') + `</ul>`;
       if (n.parent) h += `<h3>Part of</h3><ul><li class="nb" data-id="${esc(n.parent.id)}"><span class="sw" style="background:${lobeColor(n.parent)}"></span><span class="t">${esc(n.parent.title)}<span class="note">parent neuron</span></span></li></ul>`;
       if (n.children.length) h += `<h3>Sub-neurons <span>${n.children.length}</span></h3><ul>` + n.children.map(c => `<li class="nb" data-id="${esc(c.id)}"><span class="sw" style="background:${lobeColor(c)}"></span><span class="t">${esc(c.title)}<span class="note">${esc(c.desc || '')}</span></span><span class="w">${c.nSyn}</span></li>`).join('') + `</ul>`;
       if (n.neighbors.length) {
@@ -665,4 +674,8 @@
   requestAnimationFrame(draw);
   document.fonts?.ready.then(() => document.getElementById('loading').classList.add('done'));
   setTimeout(() => document.getElementById('loading').classList.add('done'), 1500);
+  // deep link from another brain or a shared URL: #n=<page id>
+  const openHash = () => { const m = /[#&]n=([^&]+)/.exec(location.hash); if (!m) return; const n = pageById[decodeURIComponent(m[1])]; if (n) { ensureVisible(n); select(n); } };
+  setTimeout(openHash, 1700);
+  window.addEventListener('hashchange', openHash);
 })();
