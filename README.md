@@ -10,6 +10,7 @@ MindBlown turns a Perplexity Brain (the `memory/knowledge` wiki) into a zoomable
 
 - `index.html` + `data.js` — the **Projects** brain (a Perplexity Brain wiki exploded into lobes, neurons and synapses).
 - `life.html` + `life-data.js` — the **Life** brain: lobes are life domains (family, crew, work, studio, money, home, body, play), neurons are people, places, habits, events and accounts, and neurons can go **one level deeper** into sub-neurons that unfold as you zoom. Synapses cite fictional mail metadata, calendar entries, playlists, bank *category names*, memory notes and Brain pages.
+- `programming.html` + `programming-data.js` — the **Programming** brain: an example of MindBlown applied to a wiki about programming. Lobes are Languages, Paradigms & Types, Data Structures & Algorithms, Systems, Tools & Craft and Pioneers & History, plus a hidden study log grouped by week. 48 neurons, 46 sub-neurons (e.g. TypeScript/Node/event loop under JavaScript, quicksort/mergesort/Timsort under Sorting), 286 synapses citing real public docs, specs, Wikipedia articles and GitHub repositories, plus fictional study sessions.
 
 No real people, projects, sessions or messages appear in either data file. A header switch links the two pages.
 
@@ -29,6 +30,7 @@ It is a static site: `index.html`, `style.css`, `app.js` (D3 v7, canvas) and `da
 ```bash
 python3 build_demo_data.py       # rewrites data.js (Projects brain)
 python3 build_life_demo_data.py  # rewrites life-data.js (Life brain)
+python3 build_programming_demo_data.py  # rewrites programming-data.js (Programming brain)
 ```
 
 ## Point it at your own Brain

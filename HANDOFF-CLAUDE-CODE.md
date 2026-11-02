@@ -4,7 +4,7 @@ Date: 2026-11-02. Prepared by Perplexity Computer after the sub-neuron release a
 
 ## Ownership
 
-- **Claude Code owns:** the two fictional generators, `index.html`/`life.html` shell markup, README, and the QA harness in `tools/`. Renderer changes (`app.js`, `style.css`) are made in `mindblown` and copied here unchanged.
+- **Claude Code owns:** the three demo generators, `index.html`/`life.html`/`programming.html` shell markup, README, and the QA harness in `tools/`. Renderer changes (`app.js`, `style.css`) are made in `mindblown` and copied here unchanged.
 - **Owner owns:** publishing to https://mindblown.pplx.app and anything that changes what is public.
 
 ## State at handoff
@@ -17,11 +17,13 @@ Date: 2026-11-02. Prepared by Perplexity Computer after the sub-neuron release a
 
 | File | Purpose |
 |---|---|
-| `index.html` | Projects brain shell; `nav.brains` links to `life.html` |
+| `index.html` | Projects brain shell; `nav.brains` links to `life.html` and `programming.html` |
 | `life.html` | Life brain shell; identical markup except the `.on` link and `<script src="./life-data.js">` |
 | `build_demo_data.py` | fictional Projects brain: 70 pages (20 sub-neurons under Tidewatch 7, Hollow Pines 7, Orbit Kitchen 6), 616 synapses, 94 sources. Prefix map decides parents. Code host is `git.example.test`. |
 | `build_life_demo_data.py` | fictional Life brain: 86 pages (22 sub-neurons under 8 parents, e.g. `money/overview` 6, `studio/repos` 5, `home/saltmarsh-house` 4), 257 synapses, 201 sources. Source helpers `SES GM CAL SP GH MEM WIKI WEB BANK_*` all emit reserved hosts. |
-| `data.js`, `life-data.js` | generated; `window.MINDBLOWN` with `demo: true`, `title`, `subtitle`, `dayName` |
+| `programming.html` | Programming brain shell; same markup, `<script src="./programming-data.js">` |
+| `build_programming_demo_data.py` | example Programming-wiki brain: 103 pages (48 top-level, 46 sub-neurons under 19 parents, 9 hidden study weeks), 286 synapses, 230 sources. Sources are real public URLs (docs, specs, Wikipedia, GitHub repos) plus fictional `pplx://sessions/` study sessions. |
+| `data.js`, `life-data.js`, `programming-data.js` | generated; `window.MINDBLOWN` with `demo: true`, `title`, `subtitle`, `dayName` |
 | `tools/qa-shot.cjs`, `tools/qa-depth.cjs` | Playwright harness, identical across the three repos |
 
 Fictional cast and hosts that must not change meaning: Sam Vale (`sam.vale@example.test`, Port Ellery), Juno, Dana Okafor, Marguerite Vale, Priya Natarajan, Tomasz Wrona, Harbourline Systems, the boat Nikau 27 "Marrow"; hosts `example.test`, `example.org`, `git.example.test`, `mail.example.test`, `music.example.test`, `gcal://demo-`, `bank://`, `memory://`, `wiki://`, `pplx://sessions/<random uuid>`.
@@ -47,4 +49,4 @@ Out of scope: adding any real data, new source kinds, or publishing.
 
 ## Sync procedure
 
-From the private `mindblown` checkout after QA: `cp app.js style.css ../mindblown-demo/ && cp tools/qa-*.cjs ../mindblown-demo/tools/`. Then here: `python3 build_demo_data.py && python3 build_life_demo_data.py` only if a generator changed, run both QA scripts on both pages, open a draft PR on a `claude/<topic>` branch. Do not comment `@coderabbitai review`; the owner decides whether to spend passes.
+From the private `mindblown` checkout after QA: `cp app.js style.css ../mindblown-demo/ && cp tools/qa-*.cjs ../mindblown-demo/tools/`. Then here: `python3 build_demo_data.py && python3 build_life_demo_data.py && python3 build_programming_demo_data.py` only if a generator changed, run both QA scripts on all three pages, open a draft PR on a `claude/<topic>` branch. Do not comment `@coderabbitai review`; the owner decides whether to spend passes.
