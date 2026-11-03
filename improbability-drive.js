@@ -197,6 +197,7 @@
     ['pointerup', 'pointercancel', 'pointerleave'].forEach(t => btn.addEventListener(t, () => btn.classList.remove('pressed')));
     document.addEventListener('keydown', e => {
       if ((e.key !== 'i' && e.key !== 'I') || e.metaKey || e.ctrlKey || e.altKey || e.repeat) return;
+      if (btn.classList.contains('mb-hidden')) return;   // a sheet or panel is over the button: the shortcut waits with it
       const t = e.target; if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || t.isContentEditable)) return;
       run();
     });
