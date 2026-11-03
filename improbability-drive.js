@@ -123,10 +123,26 @@
     // hide while a full-height sheet or panel covers the spot, so the button never floats over reading text
     const under = (document.elementsFromPoint ? document.elementsFromPoint(left + size / 2, top + size / 2) : [])
       .find(e => e !== btn && !btn.contains(e) && e !== out && e !== toastEl && !(toastEl && toastEl.contains(e)));   // the topmost thing beneath the button, not the button itself
-    btn.classList.toggle('mb-hidden', !!(under && under.closest && under.closest('.panel, .sheet, [role="dialog"], .nav-menu, .mbar-sheet')));
+    const covered = !!(under && under.closest && under.closest('.panel, .sheet, [role="dialog"], .nav-menu, .mbar-sheet'));
+    // ...or while an open phone sheet has pushed the zoom column up into the header and search
+    const b = { left, top, right: left + size, bottom: top + size };
+    const crowded = [...document.querySelectorAll('#top > *, .search, .brand, nav.brains')].some(e => {
+      if (e.offsetParent === null) return false; const q = e.getBoundingClientRect();
+      return q.width > 0 && q.left < b.right + 4 && q.right > b.left - 4 && q.top < b.bottom + 4 && q.bottom > b.top - 4;
+    });
+    const hidden = covered || crowded;
+    btn.classList.toggle('mb-hidden', hidden);
     const rightEdge = W - (left - 10);
     if (out) { out.style.right = rightEdge + 'px'; out.style.top = (top + size / 2 - 14) + 'px'; }
-    if (toastEl) { toastEl.style.right = Math.max(16, W - (left + size)) + 'px'; toastEl.style.bottom = (H - top + 12) + 'px'; }
+    if (toastEl) {
+      if (hidden) {   // the button's spot is under a panel: say it centred, clear of the panel text, instead
+        toastEl.style.right = 'auto'; toastEl.style.left = '50%'; toastEl.style.transform = 'translateX(-50%)';
+        if (W <= 900) { toastEl.style.bottom = 'auto'; toastEl.style.top = '12px'; } else { toastEl.style.top = 'auto'; toastEl.style.bottom = '72px'; }
+      } else {
+        toastEl.style.left = 'auto'; toastEl.style.top = 'auto'; toastEl.style.transform = 'none';
+        toastEl.style.right = Math.max(16, W - (left + size)) + 'px'; toastEl.style.bottom = (H - top + 12) + 'px';
+      }
+    }
   }
 
   let toastT = 0;
