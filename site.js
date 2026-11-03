@@ -3,6 +3,12 @@
 // orbiting synapses. Pure canvas, no data, no dependencies.
 (function () {
   'use strict';
+  // Stable Projects address: the old public index is the Projects brain.
+  // After the homepage rollout, the same cross-site hash reaches its new route.
+  if (location.hash === '#projects') {
+    location.replace(new URL('projects.html', location.href).href);
+    return;
+  }
   const canvas = document.getElementById('bg');
   if (!canvas) return;
   const ctx = canvas.getContext('2d');

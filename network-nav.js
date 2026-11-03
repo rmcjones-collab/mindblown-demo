@@ -3,7 +3,7 @@
  'use strict';
  if(window.MINDBLOWN_EMBEDDED)return; // Build's modal uses its parent site's navigation.
  const catalog=[
-  ['Home','https://mindblown.pplx.app/index.html'],['Projects','https://mindblown.pplx.app/projects.html'],
+  ['Home','https://mindblown.pplx.app/index.html'],['Projects','https://mindblown.pplx.app/index.html#projects'],
   ['Life','https://mindblown.pplx.app/life.html'],['Programming','https://mindblown.pplx.app/programming.html'],
   ['Build','https://mindblown.pplx.app/build.html'],['Brain 42','https://brain42.pplx.app'],
   ['The Guide','https://hgtg.pplx.app'],['Elements','https://elementsbrain.pplx.app'],
@@ -17,6 +17,10 @@
  const owner=['Owner menu','https://www.perplexity.ai/computer/a/31a9ffb6-619a-4904-bd49-59ca1c658585'];
  window.MINDBLOWN_PUBLIC_CATALOG=catalog.map(([label,href])=>({label,href}));
  const style=document.createElement('style');style.textContent=`
+ #lobes{display:block;max-height:calc(100dvh - 170px);overflow-y:auto;overscroll-behavior:contain}
+ #lobe-list{max-height:none;overflow:visible;flex:none}
+ #top .stats{white-space:nowrap;max-width:none}
+ @media(max-width:900px){#lobes{max-height:46dvh}}
  .network-picker{position:relative;flex:none!important;display:block!important}
  .network-picker .nav-btn{display:flex;align-items:center;gap:9px;max-width:190px;padding:8px 11px;background:#17252c;border:1px solid #4c626a;border-radius:8px;color:#e6f0f2;font:12px system-ui;cursor:pointer}
  .network-picker .nav-btn .cur{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
@@ -41,7 +45,8 @@
  function install(){
   const home=document.querySelector('[data-project-menu]');
   const localDemo=!!home||!!document.querySelector('script[src="./brain-nav.js"]');
-  const localCatalog=catalog.map(([l,h],i)=>[l,localDemo&&i<5?h.split('/').pop():h]);
+  const demoRoutes=['index.html','projects.html','life.html','programming.html','build.html'];
+  const localCatalog=catalog.map(([l,h],i)=>[l,localDemo&&i<5?demoRoutes[i]:h]);
   if(home){
    const here=location.pathname.split('/').pop()||'index.html';
    home.replaceChildren(...localCatalog.map(x=>anchor(x,x[1]===here)),anchor(owner));

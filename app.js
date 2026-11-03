@@ -517,11 +517,11 @@
         const rr = Math.max(44, d3.quantile(ps.map(p => Math.hypot(p.x - cx, p.y - cy)).sort(d3.ascending), 0.92) + 48);
         const [sx, sy] = toScreen(cx, cy); return { l, ps, cx, cy, rr, sx, sy, sr: rr * k };
       }).filter(Boolean).sort((a, b) => b.ps.length - a.ps.length);   // big lobes claim their spot first; small ones walk
-      const placed = [];   // screen-space label boxes already drawn this frame, so lobe titles never stack on each other
+      const placed = pages.filter(isSelf).map(p => { const [x,y]=toScreen(p.x,p.y);ctx.font="600 15px 'Satoshi', sans-serif";const w=ctx.measureText(p.title).width+24;return {x:x-w/2,y:y+8,w,h:36}; }); // Reserve hub titles.
       const hitsBox = b => placed.some(q => b.x < q.x + q.w && b.x + b.w > q.x && b.y < q.y + q.h && b.y + b.h > q.y);
       const hitsCircle = (b, self) => circles.some(c => c !== self && Math.hypot(Math.max(b.x, Math.min(c.sx, b.x + b.w)) - c.sx, Math.max(b.y, Math.min(c.sy, b.y + b.h)) - c.sy) < c.sr * 0.9);
       // the screen area a title may use: right of the lobes legend, below the header, above the hint bar
-      const edge = { x0: window.innerWidth <= 900 ? 8 : 238, x1: W - 8, y0: 78, y1: H - 70 };
+      const edge = { x0: window.innerWidth <= 900 ? 8 : 238, x1: W - 80, y0: 78, y1: H - 70 };
       const offEdge = b => Math.max(0, edge.x0 - b.x) + Math.max(0, b.x + b.w - edge.x1) + Math.max(0, edge.y0 - b.y) + Math.max(0, b.y + b.h - edge.y1);
       // when every candidate collides, take the one that overlaps least rather than the first
       const penalty = (b, self) => offEdge(b) * 3
@@ -544,7 +544,7 @@
         ctx.font = `500 ${fs2}px 'Satoshi', sans-serif`; const w2 = ctx.measureText(line2).width;
         const bw = Math.max(w1, w2), bh = fs + fs2 + 10;
         let best = null, bestPen = Infinity;
-        const tries = [0, 0.5, -0.5, 1, -1, 1.5, -1.5, 2, -2, 2.5, -2.5, Math.PI].flatMap(da => [[da, 14], [da, 14 + bh], [da, 14 + 2 * bh]]);   // walk the ring, then rings further out
+        const tries = [0, 0.5, -0.5, 1, -1, 1.5, -1.5, 2, -2, 2.5, -2.5, Math.PI].flatMap(da => [[da, 18], [da, 18 + bh], [da, 18 + 2 * bh], [da,18+3*bh]]);
         tries.sort((p, q) => (Math.abs(p[0]) + p[1] / 40) - (Math.abs(q[0]) + q[1] / 40));
         for (const [da, off] of tries) {
           const ang = a0 + da, ux = Math.cos(ang), uy = Math.sin(ang);
@@ -552,14 +552,19 @@
           const align = Math.abs(ux) < 0.35 ? 'center' : ux > 0 ? 'left' : 'right';
           const bx = align === 'center' ? sx - bw / 2 : align === 'left' ? sx : sx - bw, by = uy < -0.35 ? sy - bh : uy > 0.35 ? sy : sy - bh / 2;
           const box = { x: bx, y: by, w: bw, h: bh, sx, sy, align };
-          if (!hitsBox(box) && !hitsCircle(box, c) && !offEdge(box)) { best = box; break; }
+          if (!hitsBox(box) && !hitsCircle(box, c) && !offEdge(box)) { best = box; bestPen = 0; break; }
           const pen = penalty(box, c); if (pen < bestPen) { bestPen = pen; best = box; }
         }
+        if (bestPen > 0) return; // The sidebar retains labels that cannot fit without collisions.
         placed.push(best);
         const tl = Math.max(labelF, mouseW && Math.hypot(mouseW[0] - cx, mouseW[1] - cy) < rr ? 1 : 0);   // hovered lobe keeps its title
         if (tl < 0.02) return;
         ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
         ctx.textAlign = best.align; ctx.textBaseline = 'top';
+        const lx=Math.max(best.x,Math.min(c.sx,best.x+best.w)), ly=Math.max(best.y,Math.min(c.sy,best.y+best.h));
+        const length=Math.hypot(lx-c.sx,ly-c.sy)||1;
+        ctx.beginPath();ctx.moveTo(c.sx+(lx-c.sx)*c.sr/length,c.sy+(ly-c.sy)*c.sr/length);ctx.lineTo(lx,ly);
+        ctx.strokeStyle=rgba(l.color,0.35*lobeVis*tl);ctx.lineWidth=1;ctx.stroke();
         ctx.font = `600 ${fs}px 'Clash Display', 'Satoshi', sans-serif`; ctx.fillStyle = rgba(l.color, 0.85 * lobeVis * tl); ctx.fillText(l.name, best.sx, best.y + 2);
         ctx.font = `500 ${fs2}px 'Satoshi', sans-serif`; ctx.fillStyle = rgba('#a7b2cc', 0.8 * lobeVis * tl); ctx.fillText(line2, best.sx, best.y + fs + 8);
         ctx.setTransform(dpr, 0, 0, dpr, 0, 0); ctx.translate(tx, ty); ctx.scale(k, k);
