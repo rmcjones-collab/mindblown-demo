@@ -4,6 +4,8 @@ MindBlown explodes a Perplexity Brain (knowledge wiki) into a zoomable D3 canvas
 
 Read `HANDOFF-CLAUDE-CODE.md` next.
 
+Before ANY MindBlown-related website publication, follow `PUBLICATION-GATE.md`: real modifier-brain placement, functional Genome Layout inside Lobes, and scrolling access to every lobe and option checkbox are mandatory. Missing or unverified features block publication; a passing checklist does not authorize publishing.
+
 ## The three repositories
 
 | Repo | Visibility | Data | Role |

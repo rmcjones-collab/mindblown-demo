@@ -67,9 +67,10 @@ input { font: inherit; }
   position: absolute; left: 20px; top: 84px; width: 210px; padding: 12px 12px 10px;
   background: var(--glass); border: 1px solid var(--line); border-radius: var(--radius);
   backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
-  display: flex; flex-direction: column; max-height: calc(100vh - 84px - 86px);   /* stops above the level pill */
+  display: block; max-height: calc(100vh - 84px - 86px); /* stops above the level pill */
+  overflow-y: auto; overscroll-behavior: contain; /* one scroll path through lobes AND all options */
 }
-#lobe-list { flex: 1 1 auto; min-height: 0; overflow-y: auto; overscroll-behavior: contain; margin-right: -6px; padding-right: 6px; }
+#lobe-list { min-height: 64px; overflow: visible; margin-right: -6px; padding-right: 6px; }
 /* scrollbars: thin, rounded, the same glass as the panels */
 #lobe-list, .panel, .results, .nav-menu { scrollbar-width: thin; scrollbar-color: rgba(160, 180, 220, 0.28) transparent; }
 #lobe-list::-webkit-scrollbar, .panel::-webkit-scrollbar, .results::-webkit-scrollbar, .nav-menu::-webkit-scrollbar { width: 6px; }
