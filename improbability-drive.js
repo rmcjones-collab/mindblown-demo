@@ -48,15 +48,14 @@
 @media (prefers-reduced-motion: reduce) { .mb-drive, .mb-drive.running { transition: none; animation: none; } }
 @media print { .mb-drive, .mb-drive-out, .mb-drive-toast { display: none !important; } }`;
 
-  let btn, out, toastEl, model = null, modelKey = '';
+  let btn, out, toastEl, model = null;
 
   // ----- odds: weight 1/degree over every connected neuron except the centre -----
   function buildModel() {
     const D = window.MINDBLOWN;
     if (!D || !Array.isArray(D.pages) || !D.pages.length) return null;
     const links = Array.isArray(D.links) ? D.links : [];
-    const key = D.pages.length + ':' + links.length + ':' + (D.center || '');
-    if (model && key === modelKey) return model;
+    // rebuilt on every press from the current data (cheap: one pass over the links), so a same-size edit never leaves stale odds
     const degree = new Map(D.pages.map(p => [p.id, 0]));
     links.forEach(l => { if (degree.has(l.s)) degree.set(l.s, degree.get(l.s) + 1); if (degree.has(l.t)) degree.set(l.t, degree.get(l.t) + 1); });
     const byDeg = [...D.pages].sort((a, b) => degree.get(b.id) - degree.get(a.id));
@@ -66,7 +65,6 @@
     if (!candidates.length) return null;
     const c = candidates.map(p => ({ id: p.id, title: p.title || p.id, w: 1 / Math.max(1, degree.get(p.id)) }));
     const Z = c.reduce((a, x) => a + x.w, 0);
-    modelKey = key;
     model = { hubId, hubTitle: (D.pages.find(p => p.id === hubId) || {}).title || hubId, c, Z };
     return model;
   }
@@ -75,7 +73,6 @@
   function buildNetworkModel() {
     const N = window.MINDBLOWN_NETWORK;
     if (!N || !Array.isArray(N.brains) || !N.brains.length) return null;
-    if (model && model.network && modelKey === 'net:' + N.brains.length) return model;
     const reg = N.registry || {}, shared = N.shared || {}, c = [];
     Object.keys(shared).forEach(id => N.brains.forEach(b => {
       const k = shared[id] && shared[id][b.id]; if (!k || !b.href) return;
@@ -84,7 +81,6 @@
     }));
     if (!c.length) N.brains.forEach(b => { if (b.href) c.push({ id: b.id, title: b.title || b.id, href: b.href, w: 1 }); });
     if (!c.length) return null;
-    modelKey = 'net:' + N.brains.length;
     model = { network: true, c, Z: c.reduce((a, x) => a + x.w, 0) };
     return model;
   }
@@ -118,20 +114,35 @@
     let cx, bottom;
     if (r && r.width > 0 && r.top > size + 70) { cx = r.left + r.width / 2; bottom = r.top - 12; }
     else { cx = W - (W <= 900 ? 16 : 24) - size / 2; bottom = H - (W <= 900 ? 16 : 24) - (parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--mbar-h')) || 0); }   // no zoom column (network overviews): the usual floating-button corner, above a phone options bar if there is one
-    const left = Math.round(Math.min(W - size - 8, Math.max(8, cx - size / 2))), top = Math.round(bottom - size);
+    const clampL = x => Math.round(Math.min(W - size - 8, Math.max(8, x)));
+    const mine = e => e === btn || btn.contains(e) || e === out || e === toastEl || (toastEl && toastEl.contains(e));
+    const sheetAt = (x, y) => {   // the panel or sheet under a point, looking past the Drive's own elements
+      const e = (document.elementsFromPoint ? document.elementsFromPoint(x, y) : []).find(el => !mine(el));
+      return e && e.closest ? e.closest('.panel, .sheet, [role="dialog"], .nav-menu, .mbar-sheet') : null;
+    };
+    const CONTROLS = '#top > *, .search, .brand, nav.brains, .zoom-ctl';
+    const free = (l, t) => {   // inside the viewport, off every panel/sheet (centre and corners) and clear of the header and zoom columns
+      if (l < 4 || t < 4 || l + size > W - 4 || t + size > H - 4) return false;
+      const pts = [[l + size / 2, t + size / 2], [l + 4, t + 4], [l + size - 4, t + 4], [l + 4, t + size - 4], [l + size - 4, t + size - 4]];
+      if (pts.some(([x, y]) => sheetAt(x, y))) return false;
+      return ![...document.querySelectorAll(CONTROLS)].some(e => {
+        if (e.offsetParent === null) return false; const q = e.getBoundingClientRect();
+        return q.width > 0 && q.left < l + size + 4 && q.right > l - 4 && q.top < t + size + 4 && q.bottom > t - 4;
+      });
+    };
+    // first choice above the zoom column; when an open panel or phone sheet takes that spot, step beside the zoom column,
+    // then beside or above the panel, so the button (and its "do not press again" line) stays in reach
+    const home = [clampL(cx - size / 2), Math.round(bottom - size)];
+    const spots = [home];
+    if (r) spots.push([clampL(r.left - size - 10), Math.round(r.top)]);
+    const P = sheetAt(home[0] + size / 2, home[1] + size / 2);
+    if (P) { const q = P.getBoundingClientRect(); spots.push([clampL(q.left - size - 12), home[1]], [clampL(W - size - 16), Math.round(q.top - size - 12)]); }
+    const spot = spots.find(([l, t]) => free(l, t));
+    const [left, top] = spot || home;
     btn.style.left = left + 'px'; btn.style.top = top + 'px';
-    // hide while a full-height sheet or panel covers the spot, so the button never floats over reading text
-    const under = (document.elementsFromPoint ? document.elementsFromPoint(left + size / 2, top + size / 2) : [])
-      .find(e => e !== btn && !btn.contains(e) && e !== out && e !== toastEl && !(toastEl && toastEl.contains(e)));   // the topmost thing beneath the button, not the button itself
-    const covered = !!(under && under.closest && under.closest('.panel, .sheet, [role="dialog"], .nav-menu, .mbar-sheet'));
-    // ...or while an open phone sheet has pushed the zoom column up into the header and search
-    const b = { left, top, right: left + size, bottom: top + size };
-    const crowded = [...document.querySelectorAll('#top > *, .search, .brand, nav.brains')].some(e => {
-      if (e.offsetParent === null) return false; const q = e.getBoundingClientRect();
-      return q.width > 0 && q.left < b.right + 4 && q.right > b.left - 4 && q.top < b.bottom + 4 && q.bottom > b.top - 4;
-    });
-    const hidden = covered || crowded;
+    const hidden = !spot;   // nowhere free: hide rather than float over reading text
     btn.classList.toggle('mb-hidden', hidden);
+    btn.disabled = hidden; btn.tabIndex = hidden ? -1 : 0;   // a hidden button is out of the tab order and cannot be activated
     const rightEdge = W - (left - 10);
     if (out) { out.style.right = rightEdge + 'px'; out.style.top = (top + size / 2 - 14) + 'px'; }
     if (toastEl) {
