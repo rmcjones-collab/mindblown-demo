@@ -41,7 +41,7 @@ Fictional cast and hosts that must not change meaning: Sam Vale (`sam.vale@examp
 
 ## Demo-specific backlog
 
-1. **Brain switcher data-driven.** `nav.brains` is hand-written in the four module shells and `.site-nav` in `index.html`. If a third brain is added, emit the nav from a `D.brains[]` list or a tiny shared `brains.js`. Check: adding an entry in one place updates both pages.
+1. **Brain switcher catalog implemented.** `brain-nav.js` populates all four module dropdowns, the homepage Projects menu and public-network footer from one local/public catalog. The shell links are no-JavaScript fallbacks. Only verified public destinations belong in the catalog; never add private previews. The shared renderer stays unchanged, and Build's stripped iframe has no navigation target for the catalog to populate.
 2. **Dream log lobe in the Projects demo.** The 15 hidden "day" pages could become sub-neurons of one "Dream log" neuron (generator change, no renderer change). Check: lobe list shows one neuron with 15 sub-neurons; stats still count them separately.
 3. **Life demo money lobe.** `money/overview` has 6 children; this is the best place to test the label-collision and mobile-ring fixes from the main backlog. Check: screenshot at 390×844, 0.9×.
 4. **README screenshots.** Regenerate the README images from `tools/qa-shot.cjs` output once the label fix lands.

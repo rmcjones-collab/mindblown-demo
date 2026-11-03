@@ -48,6 +48,15 @@ h1, h2, h3 { font-family: var(--font-display); letter-spacing: -0.01em; margin: 
 .site-nav a.cta { color: #0b0e14; background: var(--text); }
 .site-nav a.cta:hover { background: #fff; }
 
+.project-picker { position: relative; }
+.project-picker summary { cursor: pointer; list-style: none; display: flex; align-items: center; gap: 16px; padding: 8px 16px; border: 1px solid var(--line-strong); border-radius: 999px; background: var(--glass-strong); font-size: 14px; }
+.project-picker summary::-webkit-details-marker { display: none; }
+.project-picker summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+.project-picker nav { position: absolute; right: 0; top: calc(100% + 8px); width: 240px; max-width: calc(100vw - 40px); max-height: min(480px, calc(100dvh - 88px)); overflow-y: auto; overscroll-behavior: contain; padding: 8px; background: #0b0f1a; border: 1px solid var(--line-strong); border-radius: var(--radius); box-shadow: 0 16px 40px #0008; }
+.project-picker nav a { display: block; padding: 8px 12px; border-radius: 7px; color: var(--text-2); text-decoration: none; font-size: 14px; }
+.project-picker nav a:hover, .project-picker nav a:focus-visible, .project-picker nav a.on { color: var(--text); background: #ffffff0d; }
+.project-picker nav .sep { display: block; height: 1px; background: var(--line); margin: 6px 4px; }
+
 main { position: relative; z-index: 1; }
 section { padding: clamp(56px, 9vw, 120px) var(--gutter); max-width: calc(var(--measure) + 2 * var(--gutter)); margin: 0 auto; }
 

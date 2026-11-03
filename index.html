@@ -32,12 +32,15 @@
     </svg>
     <span class="site-brand-text">MindBlown</span>
   </a>
-  <nav class="site-nav" aria-label="Modules">
-    <a href="projects.html">Projects</a>
-    <a href="life.html">Life</a>
-    <a href="programming.html">Programming</a>
-    <a href="build.html" class="cta">Build</a>
-  </nav>
+  <details class="project-picker">
+    <summary>Projects <span aria-hidden="true">▾</span></summary>
+    <nav data-project-menu aria-label="MindBlown projects">
+      <a href="projects.html">Projects</a>
+      <a href="life.html">Life</a>
+      <a href="programming.html">Programming</a>
+      <a href="build.html">Build</a>
+    </nav>
+  </details>
 </header>
 
 <main>
@@ -245,7 +248,7 @@
     <a href="build.html">Build</a>
     <a href="https://github.com/rmcjones-collab/mindblown-demo" rel="noopener">Source on GitHub</a>
   </div>
-  <div class="foot-links other">
+  <div class="foot-links other" data-public-networks>
     <span>Other MindBlown sites</span>
     <a href="https://gtabrain.pplx.app" rel="noopener">GTA network ↗</a>
     <a href="https://brain42.pplx.app" rel="noopener">Brain 42 ↗</a>
@@ -253,6 +256,7 @@
   <p class="foot-small">MindBlown · the Brain, exploded into synapses</p>
 </footer>
 
+<script src="./brain-nav.js"></script>
 <script src="./site.js"></script>
 </body>
 </html>
