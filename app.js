@@ -1126,5 +1126,232 @@
   setTimeout(openHash, 1700);
   window.addEventListener('hashchange', openHash);
   // read-only hooks for the QA scripts in tools/ (screen position of a neuron, current marquee selection)
+  // BEGIN MB RANDONAUT ADAPTER
+  // Read-only snapshot plus existing navigation; no dataset or learning-policy mutation.
+  window.MINDBLOWN_RANDONAUT_ADAPTER = {
+    snapshot: () => ({
+      key: location.pathname + '|' + (D.brain || D.title || 'brain'), modelToken: D,
+      title: D.title || 'MindBlown', selected: selected && selected.kind === 'page' ? selected.id : null,
+      learningAvailable: false,
+      nodes: pages.filter(pageOn).map(n => ({
+        id: n.id, title: n.title, root: !n.parent,
+        center: isSelf(n) || n.isCenter,
+        degree: n.neighbors.filter(x => pageOn(x.n)).length
+      }))
+    }),
+    navigate: id => {
+      const n = pageById[id];
+      if (!n || !pageOn(n) || n.parent || isSelf(n) || n.isCenter) return false;
+      select(n);
+      zoomTo(n, 2, reduceMotion ? 0 : 650);
+      return selected && selected.id === id;
+    }
+  };
+  window.dispatchEvent(new Event('mindblown:randonaut-ready'));
+  // END MB RANDONAUT ADAPTER
   window.MINDBLOWN_QA = { screenOf: id => { const n = pageById[id]; return n ? toScreen(n.x, n.y) : null; }, selection: () => [...multi].map(n => n.id), pinned: () => pages.filter(n => n.pinned).map(n => n.id), mode: () => mode, labels: () => labelsOn, layout: () => layout, setLayout: l => setLayout(l, { noFit: true }), chromosomes: () => chromos.filter(c => c.on).map(c => ({ id: c.id, x: c.x, top: c.top, bot: c.bot, loci: c.loci.map(p => p.id), hub: c.hubOn ? c.hubOn.id : null })), screenshot };
 })();
+
+/* BEGIN MB RANDONAUT MODULE */
+/* MindBlown shared Randonaut controller v1.
+ * Embedded by install-randonaut.cjs so existing app.js-only packaging keeps working.
+ * Graph analogies, not geographic calculations or an official Randonautica client.
+ */
+(function (root, factory) {
+  const api = factory();
+  if (typeof module === 'object' && module.exports) module.exports = api;
+  else {
+    root.MBRandonautSampling = api;
+    // The unified engine mounts after its composition promise resolves.
+    if (root.MINDBLOWN_RANDONAUT_ADAPTER) api.mount(root);
+    else root.addEventListener('mindblown:randonaut-ready', () => api.mount(root), { once: true });
+  }
+})(typeof window !== 'undefined' ? window : globalThis, function () {
+  'use strict';
+  const descriptions = {
+    blindspot: 'Equal chance among eligible, visible neurons.',
+    attractor: 'More base connections to visible neurons means a higher chance.',
+    void: 'Fewer base connections to visible neurons means a higher chance.',
+    power: 'Connection counts farther from the eligible group’s average have a higher chance.'
+  };
+  function weights(degrees, mode) {
+    if (!Object.hasOwn(descriptions, mode)) throw new Error('Unknown exploration mode');
+    const ds = degrees.map(d => Number.isFinite(d) ? Math.max(0, d) : 0);
+    const mean = ds.reduce((a, b) => a + b, 0) / (ds.length || 1);
+    return ds.map(d => mode === 'attractor' ? d + 1 : mode === 'void' ? 1 / (d + 1) : mode === 'power' ? Math.abs(d - mean) + 1 : 1);
+  }
+  function choose(nodes, mode, random) {
+    if (!nodes.length) return null;
+    const ws = weights(nodes.map(n => n.degree), mode), r = random();
+    if (!(r >= 0 && r < 1)) throw new Error('Random value outside [0,1)');
+    let t = r * ws.reduce((a, b) => a + b, 0);
+    for (let i = 0; i < nodes.length; i++) { t -= ws[i]; if (t < 0) return nodes[i]; }
+    return nodes[nodes.length - 1];
+  }
+  function candidates(snap, previous) {
+    const base = snap.nodes.filter(n => n.root && !n.center && n.id !== snap.selected);
+    const fresh = base.filter(n => n.id !== previous);
+    return fresh.length ? fresh : base;
+  }
+  function mount(w) {
+    const doc = w.document;
+    if (!w.MINDBLOWN_RANDONAUT_ADAPTER || doc.getElementById('mb-rando-dock') || doc.getElementById('rando-toggle')) return;
+    const stage = doc.getElementById('stage') || doc.body;
+    const style = doc.createElement('style');
+    style.id = 'mb-rando-style';
+    style.textContent = `
+      #mb-rando-dock,#mb-rando-panel{--mb-accent:#e5cd8e;color:#dfe5f2;font-family:var(--font-body,'Satoshi',sans-serif);box-sizing:border-box}
+      #mb-rando-dock{position:fixed;left:248px;bottom:22px;z-index:55;display:flex;background:#101723;border:1px solid #354052;border-radius:11px;box-shadow:0 6px 22px #0003}
+      #mb-rando-dock.mb-shell{bottom:54px;left:calc(var(--rail-w,232px) + 16px)}
+      #mb-rando-dock button{display:flex;align-items:center;gap:8px;min-height:44px;padding:0 12px;background:transparent;border:0;color:inherit;font:inherit;font-size:12px;cursor:pointer}
+      #mb-rando-settings{border-left:1px solid #354052!important;color:#aebbd1!important}
+      #mb-rando-toggle strong{font-size:10px;letter-spacing:.06em;font-weight:600;color:#aebbd1}
+      #mb-rando-toggle[aria-checked=true] strong{color:var(--mb-accent)}
+      .mb-rando-track{width:28px;height:17px;padding:2px;border:1px solid #65718a;border-radius:12px;background:#202939;box-sizing:border-box}
+      .mb-rando-track i{display:block;width:11px;height:11px;border-radius:50%;background:#a7b2cc;transition:transform .15s}
+      [aria-checked=true] .mb-rando-track{background:#625533;border-color:var(--mb-accent)}
+      [aria-checked=true] .mb-rando-track i{transform:translateX(11px);background:var(--mb-accent)}
+      #mb-rando-panel{position:fixed;left:248px;bottom:80px;z-index:56;width:344px;max-height:calc(100dvh - 160px);overflow:auto;overscroll-behavior:contain;padding:18px;background:#0e1521;border:1px solid #354052;border-radius:14px;box-shadow:0 12px 42px #0008;scrollbar-width:thin}
+      #mb-rando-panel.mb-shell{bottom:110px;left:calc(var(--rail-w,232px) + 16px)}
+      #mb-rando-panel[hidden]{display:none}
+      #mb-rando-panel header{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;margin-bottom:14px}
+      #mb-rando-panel h2{font-family:var(--font-display,'Satoshi',sans-serif);font-size:21px;line-height:1.2;margin:4px 0}
+      #mb-rando-panel .mb-eyebrow{font-size:9px;letter-spacing:.15em;color:var(--mb-accent)}
+      #mb-rando-close{min-width:36px;min-height:36px;border:1px solid #354052;border-radius:8px;background:#17202e;color:#dfe5f2;font-size:20px;cursor:pointer}
+      #mb-rando-panel label{display:block;font-size:12px;margin:12px 0 6px}
+      #mb-rando-panel p{font-size:12px;line-height:1.55;color:#aebbd1;margin:6px 0 12px}
+      #mb-rando-panel .mb-small{font-size:11px}
+      #mb-rando-panel input,#mb-rando-panel select{box-sizing:border-box;width:100%;min-height:44px;padding:10px;color:#dfe5f2;background:#17202e;border:1px solid #354052;border-radius:8px;font:inherit;font-size:12px}
+      #mb-rando-generate{width:100%;min-height:44px;margin-top:6px;padding:10px;border:1px solid var(--mb-accent);border-radius:8px;background:var(--mb-accent);color:#111724;font:inherit;font-size:13px;font-weight:700;cursor:pointer}
+      #mb-rando-generate:disabled{background:#263040;color:#aebbd1;border-color:#354052;cursor:default}
+      #mb-rando-status{color:var(--mb-accent)!important;min-height:36px}
+      #mb-rando-panel details{border-top:1px solid #354052;padding-top:12px;margin-top:12px}
+      #mb-rando-panel summary{font-size:12px;cursor:pointer;min-height:30px}
+      #mb-rando-journal{padding-left:22px;font-size:12px;line-height:1.55;overflow-wrap:anywhere}
+      #mb-rando-journal li{padding:5px 0}
+      #mb-rando-journal small{display:block;color:#aebbd1}
+      #mb-rando-dock :focus-visible,#mb-rando-panel :focus-visible{outline:2px solid var(--mb-accent);outline-offset:3px}
+      @media(max-width:900px){
+        #mb-rando-dock,#mb-rando-dock.mb-shell{left:12px;bottom:auto;top:var(--mb-rando-top,144px);max-width:calc(100vw - 24px)}
+        #mb-rando-panel,#mb-rando-panel.mb-shell{left:12px;right:12px;width:auto;bottom:auto;top:calc(var(--mb-rando-top,144px) + 54px);max-height:calc(100dvh - var(--mb-rando-top,144px) - 66px)}
+      }
+      @media(prefers-reduced-motion:reduce){.mb-rando-track i{transition:none}}
+    `;
+    doc.head.append(style);
+    const dock = doc.createElement('section'); dock.id = 'mb-rando-dock'; dock.setAttribute('aria-label', 'Randonaut exploration');
+    dock.innerHTML = '<button id="mb-rando-toggle" type="button" role="switch" aria-checked="false" aria-label="Randonaut mode"><span class="mb-rando-track" aria-hidden="true"><i></i></span><span>Randonaut <strong id="mb-rando-state">OFF</strong></span></button><button id="mb-rando-settings" type="button" aria-expanded="false" aria-controls="mb-rando-panel">Settings</button>';
+    const panel = doc.createElement('section'); panel.id = 'mb-rando-panel'; panel.hidden = true; panel.setAttribute('aria-labelledby', 'mb-rando-title');
+    // Only hardcoded markup goes through innerHTML. User/dataset text uses textContent.
+    panel.innerHTML = `<header><div><span class="mb-eyebrow">EXPLORATION MODULE</span><h2 id="mb-rando-title">Follow the unexpected.</h2></div><button id="mb-rando-close" type="button" aria-label="Close Randonaut settings">×</button></header>
+      <p id="mb-rando-brain"></p><p>Explore this Brain’s knowledge, not geographic destinations. Browser randomness, not quantum entropy.</p>
+      <label for="mb-rando-mode">Destination style</label><select id="mb-rando-mode"><option value="blindspot">Blind Spot · any eligible neuron</option><option value="attractor">Attractor · connected hubs</option><option value="void">Void · quieter corners</option><option value="power">Power · connection extremes</option></select>
+      <p id="mb-rando-method" class="mb-small"></p>
+      <label for="mb-rando-intention">Intention · optional reflection</label><input id="mb-rando-intention" maxlength="140" autocomplete="off" placeholder="What would you like to notice?">
+      <p class="mb-small">Intention does not change the selection. This text and your journal stay in this tab’s memory and clear when the Brain changes or reloads.</p>
+      <button id="mb-rando-generate" type="button" disabled>Turn Randonaut ON to explore</button>
+      <p id="mb-rando-status" role="status" aria-live="polite">OFF. Ordinary navigation remains available.</p>
+      <details><summary>Session journal <span id="mb-rando-count">0</span></summary><p class="mb-small">Latest 20 arrivals. No new storage, location requests or analytics.</p><ol id="mb-rando-journal"></ol></details>
+      <details><summary>How this mode works</summary><p>These are graph analogies, not the official app’s geographic anomaly calculations. Base connections to visible neurons set the sampling weights, independent of learned weights and pruning.</p><p id="mb-rando-learning"></p><p>No facts, evidence ratings or source files are changed. No autonomous research is running. Independent module, not affiliated with Randonautica.</p></details>`;
+    if (w.MBCatalog) { dock.classList.add('mb-shell'); panel.classList.add('mb-shell'); }
+    stage.append(dock, panel);
+    const $ = id => doc.getElementById('mb-rando-' + id);
+    let enabled = false, pending = null, token = 0, previous = null, count = 0, entries = [];
+    let activeAdapter = w.MINDBLOWN_RANDONAUT_ADAPTER, snapshot = activeAdapter.snapshot();
+    let key = snapshot.key, modelToken = snapshot.modelToken;
+    const random = () => w.crypto?.getRandomValues ? w.crypto.getRandomValues(new Uint32Array(1))[0] / 4294967296 : Math.random();
+    function place() {
+      const top = doc.getElementById('top');
+      const y = Math.max(8, Math.min((top?.getBoundingClientRect().bottom || 124) + 10, w.innerHeight - 120));
+      doc.documentElement.style.setProperty('--mb-rando-top', y + 'px');
+    }
+    w.addEventListener('resize', place);
+    if (w.ResizeObserver && doc.getElementById('top')) new w.ResizeObserver(place).observe(doc.getElementById('top'));
+    place();
+    function cancel() { ++token; if (pending !== null) w.clearTimeout(pending); pending = null; }
+    function reset() {
+      cancel(); enabled = false; previous = null; entries = []; count = 0;
+      $('journal').replaceChildren(); $('count').textContent = '0'; $('intention').value = ''; panel.hidden = true;
+      $('settings').setAttribute('aria-expanded', 'false');
+      $('status').textContent = 'OFF. New Brain session; ordinary navigation remains available.';
+      sync();
+    }
+    function current() {
+      const adapter = w.MINDBLOWN_RANDONAUT_ADAPTER, next = adapter.snapshot();
+      if (adapter !== activeAdapter || next.key !== key || next.modelToken !== modelToken) {
+        activeAdapter = adapter; key = next.key; modelToken = next.modelToken; snapshot = next; reset();
+      } else snapshot = next;
+      return snapshot;
+    }
+    function sync() {
+      $('toggle').setAttribute('aria-checked', String(enabled)); $('state').textContent = enabled ? 'ON' : 'OFF';
+      $('generate').disabled = !enabled || pending !== null;
+      $('generate').textContent = !enabled ? 'Turn Randonaut ON to explore' : pending !== null ? 'Finding a destination…' : 'Generate a knowledge journey';
+      $('method').textContent = descriptions[$('mode').value];
+      $('brain').textContent = 'Current Brain: ' + (snapshot.title || 'Untitled');
+      $('learning').textContent = snapshot.learningAvailable ? 'The existing Learning switch stays separate. Normal routes may strengthen connections when learning is ON; this is not evidence that a fact is true.' : 'This renderer navigates visually; it does not learn navigation weights. The module does not add a hidden learning system.';
+    }
+    function open(value, focus = true) {
+      current(); panel.hidden = !value; $('settings').setAttribute('aria-expanded', String(value)); place();
+      if (focus) (value ? $('mode') : $('settings')).focus();
+    }
+    $('toggle').addEventListener('click', () => {
+      current(); enabled = !enabled;
+      if (enabled) { $('status').textContent = 'ON. Generate when ready. Nothing runs in the background.'; open(true, false); }
+      else { cancel(); $('status').textContent = 'OFF. Pending journeys stopped. Ordinary navigation remains available.'; }
+      sync();
+    });
+    $('settings').addEventListener('click', () => open(panel.hidden));
+    $('close').addEventListener('click', () => open(false));
+    dock.addEventListener('keydown', e => { if (e.key === ' ' || e.key === 'Enter') e.stopPropagation(); });
+    panel.addEventListener('keydown', e => {
+      e.stopPropagation();
+      if (e.key === 'Escape') { e.preventDefault(); open(false); }
+    });
+    $('mode').addEventListener('change', () => { current(); cancel(); sync(); $('status').textContent = enabled ? 'Style changed. Generate when ready.' : 'OFF. Turn the mode on when ready.'; });
+    $('generate').addEventListener('click', () => {
+      const snap = current();
+      if (!enabled || pending !== null) return;
+      const pool = candidates(snap, previous);
+      if (!pool.length) { $('status').textContent = 'No other eligible neurons. Show another lobe or clear the current selection.'; return; }
+      const styleName = $('mode').value, thought = $('intention').value.trim().slice(0, 140);
+      const destination = choose(pool, styleName, random), run = ++token, runKey = key, runModel = modelToken;
+      pending = w.setTimeout(() => {
+        pending = null;
+        const now = current();
+        if (!enabled || token !== run || key !== runKey || modelToken !== runModel) { sync(); return; }
+        if (!candidates(now, null).some(n => n.id === destination.id)) {
+          $('status').textContent = 'The visible selection changed. Generate again using this Brain’s visible neurons.'; sync(); return;
+        }
+        try {
+          if (!activeAdapter.navigate(destination.id)) throw new Error('Destination unavailable');
+          previous = destination.id; count++;
+          entries.unshift({ id: destination.id, title: destination.title, mode: styleName, intention: thought, time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) });
+          entries = entries.slice(0, 20); $('count').textContent = String(count); $('journal').replaceChildren();
+          for (const item of entries) {
+            const li = doc.createElement('li'), name = doc.createElement('span'), detail = doc.createElement('small');
+            name.textContent = item.title; detail.textContent = item.time + ' · ' + item.mode + (item.intention ? ' · Intention: ' + item.intention : '');
+            li.append(name, detail); $('journal').append(li);
+          }
+          $('status').textContent = 'Arrived at “' + destination.title + '”. Read its facts in the details panel.';
+          if (w.matchMedia('(max-width:900px)').matches) open(false, false);
+        } catch (e) {
+          console.error('Randonaut journey failed', e);
+          $('status').textContent = 'The journey could not finish. Normal navigation is still available.';
+        }
+        sync();
+      }, w.matchMedia('(prefers-reduced-motion:reduce)').matches ? 0 : 220);
+      $('status').textContent = 'Sampling visible knowledge…'; sync();
+    });
+    w.addEventListener('pagehide', reset);
+    w.addEventListener('pageshow', e => { if (e.persisted) reset(); });
+    w.MB_RANDONAUT = Object.freeze({
+      get enabled() { return enabled; }, get pending() { return pending !== null; },
+      get count() { return count; }, get brainKey() { return key; },
+      get journal() { return entries.map(e => ({ ...e })); }
+    });
+    sync();
+  }
+  return { descriptions, weights, choose, candidates, mount };
+});
+
+/* END MB RANDONAUT MODULE */
