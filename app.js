@@ -159,6 +159,15 @@
     lobes.filter(l => !l.brain && !selfLobe(l)).forEach(l => { const c = { id: l.id, name: l.name, color: l.color, hub: null, segs: [l] }; chromos.push(c); chromoOf[l.id] = c; });
   } else lobes.filter(l => !selfLobe(l)).forEach(l => { const c = { id: l.id, name: l.name, color: l.color, hub: null, segs: [l] }; chromos.push(c); chromoOf[l.id] = c; });
   const sameChromo = (a, b) => chromoOf[a.lobe] && chromoOf[a.lobe] === chromoOf[b.lobe];
+  // dragging in the genome layout moves a whole chromosome: bar, bands, sub-neurons and hub travel together, so the picture never splits
+  const chromoOfNode = n => { const p = isChild(n) ? n.parent : n; return chromos.find(c => c.hubOn === p) || chromoOf[p.lobe] || null; };
+  const chromoMembers = c => [...(c.hubOn ? [c.hubOn, ...c.hubOn.children] : []), ...c.loci, ...c.loci.flatMap(p => p.children)];
+  // while a chromosome is in hand its members ride along fixed (fx/fy); the anchor forces only learn the new loci in refreshForces(), which the drop calls
+  const nudge = (p, dx, dy) => { p.gx += dx; p.gy += dy; p.x += dx; p.y += dy; p.fx = p.x; p.fy = p.y; p.vx = p.vy = 0; };
+  function moveChromo(c, dx, dy) { c.x += dx; c.cy += dy; c.top += dy; c.bot += dy; c.ox = (c.ox || 0) + dx; c.oy = (c.oy || 0) + dy; chromoMembers(c).forEach(p => nudge(p, dx, dy)); }
+  const mapMoved = () => chromos.some(c => c.ox || c.oy) || pages.some(p => p.gox || p.goy);
+  function dropChromos(d) { [...d.chromos.flatMap(chromoMembers), ...d.loose, ...d.loose.flatMap(p => p.children)].forEach(p => { if (!p.pinned) { p.fx = null; p.fy = null; } }); refreshForces(); }
+  function resetMap() { chromos.forEach(c => { c.ox = c.oy = 0; }); pages.forEach(p => { p.gox = p.goy = 0; }); layoutGenome(false); refreshForces(); sim.alpha(0.5).restart(); }
   // The map is static: slots and columns are sized for the unfolded, exploded state up front, so zooming never shifts a locus.
   // the room a locus needs along the bar: its own body (drawn ~1.6× at karyogram zoom) or its sub-neuron column, whichever is taller
   const kidPitch = c => 2 * c.r * 1.5 + 8;
@@ -197,7 +206,8 @@
       const row = on.slice(r * per, (r + 1) * per); if (!row.length) break;
       const above = Math.max(...row.map(c => c.above)), below = Math.max(...row.map(c => c.below));
       let x = 0; row.forEach(c => { x += c.reachL + G.barW / 2; c.x = x; c.cy = rowTop + above; x += G.barW / 2 + c.reachR + G.gapX; });
-      const shift = (x - G.gapX) / 2; row.forEach(c => { c.x -= shift; });
+      // c.ox/c.oy are the hand offsets from dragging a chromosome; they survive a relayout so a toggled lobe does not undo the user's arrangement
+      const shift = (x - G.gapX) / 2; row.forEach(c => { c.x += (c.ox || 0) - shift; c.cy += c.oy || 0; });
       spans.push({ x0: -shift, x1: x - G.gapX - shift });
       rowTop += above + below + G.rowGap;
     }
@@ -213,7 +223,7 @@
       if (c.hubOn) { c.hubOn.gx = c.x; c.hubOn.gy = c.cy; placeKids(c.hubOn); }
     });
     // a single brain's hub (and any other self-lobe neuron) sits above the karyogram, the nucleus the chromosomes came out of
-    if (!brainsIn) { const hubs = pages.filter(p => isSelf(p) && !isChild(p) && pageOn(p)), span = spans[0] || { x0: 0, x1: 0 }, top = on.length ? Math.min(...on.map(c => c.top)) : 0; hubs.forEach((p, i) => { p.gx = (span.x0 + span.x1) / 2 + (i - (hubs.length - 1) / 2) * 120; p.gy = top - G.hubGap; placeKids(p); }); }
+    if (!brainsIn) { const hubs = pages.filter(p => isSelf(p) && !isChild(p) && pageOn(p)), span = spans[0] || { x0: 0, x1: 0 }, top = on.length ? Math.min(...on.map(c => c.top - (c.oy || 0))) : 0; hubs.forEach((p, i) => { p.gx = (span.x0 + span.x1) / 2 + (i - (hubs.length - 1) / 2) * 120 + (p.gox || 0); p.gy = top - G.hubGap + (p.goy || 0); placeKids(p); }); }
     if (snap) pages.forEach(p => { if (p.gx !== undefined) { p.x = isChild(p) ? p.parent.gx : p.gx; p.y = isChild(p) ? p.parent.gy : p.gy; p.vx = p.vy = 0; } });
   }
   let mouseW = null;                      // cursor in world units, for lobe hover while labels are off
@@ -788,7 +798,8 @@
     // mouse3 (middle or right button) on a neuron picks it up; in Select mode the left button does too
     if (onNeuron && (e.button === 1 || e.button === 2 || (e.button === 0 && mode === 'select' && !spaceDown))) {
       const group = multi.has(pressed) ? [...multi] : [pressed];
-      drag = { nodes: group.map(n => ({ n, x: n.x, y: n.y })), sx: e.clientX, sy: e.clientY, moved: false };
+      drag = { nodes: group.map(n => ({ n, x: n.x, y: n.y })), sx: e.clientX, sy: e.clientY, moved: false, ldx: 0, ldy: 0 };
+      if (genome()) { const cs = new Set(), loose = []; group.forEach(n => { const c = chromoOfNode(n); c ? cs.add(c) : loose.push(isChild(n) ? n.parent : n); }); drag.chromos = [...cs]; drag.loose = [...new Set(loose)]; }
       canvas.setPointerCapture(e.pointerId); canvas.classList.add('moving'); tip.hidden = true;
     } else if (!onNeuron && e.button === 0 && mode === 'select' && !spaceDown) {
       marquee = { x0: e.clientX, y0: e.clientY, x1: e.clientX, y1: e.clientY };
@@ -799,7 +810,7 @@
     canvas.classList.remove('grabbing'); canvas.classList.remove('moving');
     const small = downAt && Math.hypot(e.clientX - downAt[0], e.clientY - downAt[1]) < 5;
     if (drag) {
-      if (drag.moved) { drag.nodes.forEach(({ n }) => { n.pinned = true; n.fx = n.x; n.fy = n.y; }); sim.alpha(Math.max(sim.alpha(), 0.2)).restart(); }
+      if (drag.moved) { drag.chromos ? dropChromos(drag) : drag.nodes.forEach(({ n }) => { n.pinned = true; n.fx = n.x; n.fy = n.y; }); sim.alpha(Math.max(sim.alpha(), 0.2)).restart(); updateHint(); }
       else if (downBtn === 0) clickNeuron(pressed, downShift);
       else if (!multi.has(pressed)) { multi.clear(); multi.add(pressed); updateHint(); }   // a plain mouse3 click just picks the neuron for moving
       drag = null;
@@ -828,7 +839,8 @@
   }
   function releaseAll() {
     pages.forEach(n => { if (n.pinned) { n.pinned = false; if (n !== selected) { n.fx = null; n.fy = null; } } });
-    sim.alpha(0.5).restart(); updateHint();
+    if (genome() && mapMoved()) resetMap(); else sim.alpha(0.5).restart();
+    updateHint();
   }
   function setMode(m) { mode = m; canvas.classList.toggle('select', m === 'select'); document.querySelectorAll('.tool-mode').forEach(b => b.classList.toggle('on', b.dataset.mode === m)); updateHint(); }
   canvas.addEventListener('pointermove', e => {
@@ -836,7 +848,11 @@
       const dx = (e.clientX - drag.sx) / k, dy = (e.clientY - drag.sy) / k;
       if (!drag.moved && Math.hypot(e.clientX - drag.sx, e.clientY - drag.sy) >= 3) drag.moved = true;
       if (!drag.moved) return;
-      drag.nodes.forEach(({ n, x, y }) => { n.fx = n.x = x + dx; n.fy = n.y = y + dy; n.vx = n.vy = 0; });
+      if (drag.chromos) {
+        const ddx = dx - drag.ldx, ddy = dy - drag.ldy; drag.ldx = dx; drag.ldy = dy;
+        drag.chromos.forEach(c => moveChromo(c, ddx, ddy));
+        drag.loose.forEach(p => { p.gox = (p.gox || 0) + ddx; p.goy = (p.goy || 0) + ddy; nudge(p, ddx, ddy); p.children.forEach(x => nudge(x, ddx, ddy)); });
+      } else drag.nodes.forEach(({ n, x, y }) => { n.fx = n.x = x + dx; n.fy = n.y = y + dy; n.vx = n.vy = 0; });
       if (sim.alpha() < 0.12) sim.alpha(0.12).restart();   // let synapses, sources and sub-neurons follow their neuron
       return;
     }
@@ -1069,7 +1085,8 @@
     const pinned = pages.filter(n => n.pinned).length;
     if (multi.size > 1) { hint.textContent = `${multi.size} neurons selected · drag one to move them all · Shift+click adds · Esc clears${pinned ? ' · R releases pins' : ''}`; return; }
     if (pinned && lvl === 'Lobes') { hint.textContent = `${plural(pinned, 'neuron')} placed by hand · R releases them`; return; }
-    if (lvl === 'Lobes') { hint.textContent = genome() ? 'genome layout · each bar is a lobe, each band a neuron · G returns to the neural layout' : mode === 'select' ? 'scroll to zoom · drag to select · mouse3 or Space to pan · drag a neuron to move it · G for genome layout' : 'scroll to zoom · drag to pan · click a neuron · V for select mode · G for genome layout'; return; }
+    if (genome() && mapMoved() && lvl === 'Lobes') { hint.textContent = 'chromosomes moved by hand · drag a band to move its whole chromosome · R resets the map'; return; }
+    if (lvl === 'Lobes') { hint.textContent = genome() ? 'genome layout · each bar is a lobe, each band a neuron · drag a band to move its chromosome · G returns to the neural layout' : mode === 'select' ? 'scroll to zoom · drag to select · mouse3 or Space to pan · drag a neuron to move it · G for genome layout' : 'scroll to zoom · drag to pan · click a neuron · V for select mode · G for genome layout'; return; }
     hint.textContent = lvl === 'Lobes' ? 'scroll to zoom · drag to pan · click a neuron' : lvl === 'Neurons' ? (hasSubs ? 'keep zooming: sub-neurons unfold at 0.85×, synapses at 1.5×' : 'keep zooming: synapses explode at 1.5×') : lvl === 'Sub-neurons' ? 'small satellites are sub-neurons · zoom past 1.5× to explode synapses' : 'dots are synapses · diamonds are sources · dashed lines fire across neurons';
   }
   function updateStats() {
