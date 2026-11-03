@@ -1,3 +1,4 @@
+/*! MindBlown — © 2026 Rory Jones. All rights reserved. Source-available under the PolyForm Strict License 1.0.0 (see LICENSE.md); no copying, modification, redistribution or commercial use without written permission. */
 /* MindBlown: Build — page-specific styles layered on style.css */
 [hidden] { display: none !important; }
 
@@ -265,3 +266,9 @@
 .lightbox img { max-width: 100%; max-height: calc(100% - 40px); border-radius: 12px; box-shadow: 0 30px 80px rgba(0, 0, 0, 0.6); }
 .lightbox .lb-cap { font-size: 13px; color: var(--text-2); }
 .lightbox .lb-close { position: absolute; top: 16px; right: 16px; width: 36px; height: 36px; border-radius: 10px; border: 1px solid var(--line); background: var(--glass); color: var(--text); font-size: 20px; cursor: pointer; }
+
+/* ownership notice — small, fixed, never over the controls */
+.legal { position: fixed; left: 12px; bottom: 6px; z-index: 5; font-size: 11px; letter-spacing: .01em; color: rgba(190, 205, 235, 0.55); pointer-events: auto; user-select: none; }
+.legal a { color: rgba(190, 205, 235, 0.7); text-decoration: none; border-bottom: 1px dotted rgba(190, 205, 235, 0.4); }
+.legal a:hover { color: #fff; }
+@media (max-width: 640px) { .legal { font-size: 10px; left: 8px; bottom: 4px; } }

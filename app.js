@@ -1,3 +1,4 @@
+/*! MindBlown — © 2026 Rory Jones. All rights reserved. Source-available under the PolyForm Strict License 1.0.0 (see LICENSE.md); no copying, modification, redistribution or commercial use without written permission. */
 /* MindBlown — explode the Brain into lobes, neurons and synapses. */
 (() => {
   // ---------- nav: one dropdown of every brain, in the header on every page ----------

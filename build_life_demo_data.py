@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# MindBlown — © 2026 Rory Jones. All rights reserved. Source-available under the PolyForm Strict License 1.0.0 (see LICENSE.md).
 """Generate a fully fictional *life* brain for the MindBlown demo (life-data.js).
 
 Everything here is invented: Sam Vale, Port Ellery, the people, the boat, the mail,

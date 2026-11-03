@@ -1,3 +1,4 @@
+/*! MindBlown — © 2026 Rory Jones. All rights reserved. Source-available under the PolyForm Strict License 1.0.0 (see LICENSE.md); no copying, modification, redistribution or commercial use without written permission. */
 /* MindBlown: Build — start from an empty brain and grow it by answering questions.
    Everything lives in this browser (or in the brain file you save). Nothing is uploaded. */
 (() => {

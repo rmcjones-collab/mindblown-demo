@@ -1,3 +1,4 @@
+/*! MindBlown — © 2026 Rory Jones. All rights reserved. Source-available under the PolyForm Strict License 1.0.0 (see LICENSE.md); no copying, modification, redistribution or commercial use without written permission. */
 /* MindBlown: Build — default categories, question bank and templates.
    Everything here is a starting point; the user can disable, edit, add to or replace it in the app. */
 window.MINDBLOWN_BUILD = {

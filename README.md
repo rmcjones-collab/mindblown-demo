@@ -65,3 +65,14 @@ Give any page a `"parent": "<page id>"` and it becomes a sub-neuron: folded into
 ## For Claude Code
 
 Start with `CLAUDE.md` (rules and conventions) and `HANDOFF-CLAUDE-CODE.md` (module map, QA harness, review dispositions, backlog). QA: `node tools/qa-shot.cjs <url>` and `node tools/qa-depth.cjs <url>` against a local `python3 -m http.server`.
+
+## Ownership, licence and partnerships
+
+MindBlown is created and owned by Rory Jones. The public site is free to use, and this
+repository is **source-available, not open source**: it is published under the
+[PolyForm Strict License 1.0.0](LICENSE.md), which permits personal, noncommercial use
+and reading of the code but not copying it into other projects, modification,
+redistribution or commercial use. Partnership proposals are welcome; the application is
+not for sale. See [PARTNERSHIPS.md](PARTNERSHIPS.md).
+
+© 2026 Rory Jones. MindBlown™ and the lobe/neuron/synapse mark are used as trademarks of the owner.

@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# MindBlown — © 2026 Rory Jones. All rights reserved. Source-available under the PolyForm Strict License 1.0.0 (see LICENSE.md).
 """Generate a fully fictional demo Brain for MindBlown (same schema as build_data.py output).
 
 Everything here is invented: the persona, projects, people, sessions and repositories.

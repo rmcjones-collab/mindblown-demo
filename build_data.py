@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# MindBlown — © 2026 Rory Jones. All rights reserved. Source-available under the PolyForm Strict License 1.0.0 (see LICENSE.md).
 """Explode the knowledge wiki into neurons (pages), synapses (bullets) and sparks (sources)."""
 import json, os, re, glob, hashlib
 from collections import defaultdict
