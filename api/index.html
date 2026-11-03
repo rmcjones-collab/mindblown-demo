@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Brain API · MindBlown</title>
+<meta name="description" content="The read API of the MindBlown brains on this host: discovery, neurons, synapses, sources, graph, search and feed documents, with clients for JavaScript, Python and MCP.">
+<link rel="preconnect" href="https://api.fontshare.com">
+<link href="https://api.fontshare.com/v2/css?f[]=clash-display@500,600,700&f[]=satoshi@400,500,700&display=swap" rel="stylesheet">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ccircle cx='16' cy='16' r='6' fill='%23ff8a3d'/%3E%3C/svg%3E">
+<link rel="stylesheet" href="./api.css">
+</head>
+<body>
+<header class="top">
+  <a class="brand" href="../" title="Back to the brain">
+    <svg viewBox="0 0 32 32" width="26" height="26" aria-hidden="true"><circle cx="16" cy="16" r="4.2" fill="currentColor"/><g fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"><path d="M16 12V5M16 20v7M12 16H5M20 16h7M13 13l-5-5M19 19l5 5M19 13l5-5M13 19l-5 5"/></g><g fill="currentColor"><circle cx="16" cy="4" r="1.6"/><circle cx="16" cy="28" r="1.6"/><circle cx="4" cy="16" r="1.6"/><circle cx="28" cy="16" r="1.6"/><circle cx="7" cy="7" r="1.3"/><circle cx="25" cy="25" r="1.3"/><circle cx="25" cy="7" r="1.3"/><circle cx="7" cy="25" r="1.3"/></g></svg>
+    <span class="brand-text"><span class="title">MindBlown</span><span class="sub" id="host-title">Brain API</span></span>
+  </a>
+  <nav class="brains" id="brain-nav" aria-label="Brains on this host"></nav>
+  <div class="proto"><code>mindblown-brain/1</code></div>
+</header>
+
+<main>
+  <section class="hero">
+    <h1>Every brain here has an API.</h1>
+    <p class="lede">Each MindBlown brain on this host is also a set of plain JSON documents: its lobes, neurons, synapses, sources, links, a graph, a search index and a feed. Any app, script, automation or AI assistant can read them. No key, no backend, no rate limit beyond the host's.</p>
+    <div class="stats" id="host-stats" aria-live="polite"></div>
+    <div class="discover">
+      <span class="k">Discovery</span>
+      <a id="disc-link" href="../.well-known/mindblown.json"><code>/.well-known/mindblown.json</code></a>
+      <span class="or">or</span>
+      <a href="./index.json"><code>/api/index.json</code></a>
+    </div>
+  </section>
+
+  <section class="brain-grid" id="brain-grid" aria-label="Brains"></section>
+
+  <section class="try" id="try">
+    <div class="try-head">
+      <h2>Call it</h2>
+      <p>Pick a brain and a document; the explorer fetches it from this host and shows the result. Page documents need a page id.</p>
+    </div>
+    <div class="try-grid">
+      <form class="controls" id="try-form" autocomplete="off">
+        <label>Brain <select id="t-brain"></select></label>
+        <label>Document <select id="t-endpoint"></select></label>
+        <label id="t-page-wrap" hidden>Page <input id="t-page" list="t-pages" placeholder="type to find a neuron…"><datalist id="t-pages"></datalist></label>
+        <label id="t-query-wrap" hidden>Query <input id="t-query" placeholder="words to search for"></label>
+        <div class="row">
+          <button type="submit" class="go">Fetch</button>
+          <a id="t-open" class="open" target="_blank" rel="noopener">open raw ↗</a>
+          <span id="t-meta" class="meta"></span>
+        </div>
+      </form>
+      <div class="result">
+        <div class="result-bar"><span id="r-url" class="url"></span><button type="button" id="r-copy" class="copy" title="Copy the response">copy</button></div>
+        <pre id="r-body" class="body" aria-live="polite">Loading the host's brains…</pre>
+      </div>
+    </div>
+  </section>
+
+  <section class="snippets">
+    <div class="snip-head">
+      <h2>Connect an app</h2>
+      <p>The same documents from a shell, a browser, Python, or an AI assistant through MCP. The clients are served from this host; copy the files or load them from here.</p>
+    </div>
+    <div class="tabs" role="tablist" id="tabs">
+      <button role="tab" aria-selected="true" data-tab="curl">curl</button>
+      <button role="tab" data-tab="js">JavaScript</button>
+      <button role="tab" data-tab="py">Python</button>
+      <button role="tab" data-tab="mcp">MCP</button>
+      <button role="tab" data-tab="feed">Feeds &amp; automations</button>
+      <button role="tab" data-tab="graph">Graph tools</button>
+    </div>
+    <div class="tab-body"><pre id="snippet"></pre><button type="button" class="copy" id="s-copy">copy</button></div>
+  </section>
+
+  <section class="docs">
+    <h2>Documents of a brain</h2>
+    <table class="ep">
+      <thead><tr><th>Path</th><th>What it holds</th><th>Size</th></tr></thead>
+      <tbody id="ep-table"></tbody>
+    </table>
+    <div class="notes">
+      <h3>Two transports</h3>
+      <p>Every <code>X.json</code> has an <code>X.js</code> twin. The twin wraps the same document in a call to <code>window.MINDBLOWN_API.receive({protocol, brain, endpoint, data})</code>, so a page on another origin can read a brain through a <code>&lt;script&gt;</code> tag even when this host sends no CORS headers. The JavaScript client switches automatically; servers and scripts use the JSON directly.</p>
+      <h3>Page ids in paths</h3>
+      <p>A page id such as <code>projects/tidewatch</code> becomes <code>projects~2ftidewatch</code>: letters, digits, <code>.</code>, <code>_</code> and <code>-</code> stay, every other UTF-8 byte becomes <code>~hh</code>. <code>pages.json</code> lists the ready-made <code>api</code> path of every page, so clients rarely need to encode anything.</p>
+      <h3>Networks and shared neurons</h3>
+      <p>When a host carries several brains, <code>/api/network/v1/network.json</code> lists them with the neuron ids they share and the peer hosts this network points at. Follow <code>peers</code> to walk from one MindBlown site to the next: each one has the same discovery document.</p>
+      <h3>Writing back</h3>
+      <p>These documents are read-only by design. A brain's manifest may name a <code>write</code> route: the <a href="https://hubbrain.pplx.app/connect.html">AI Hub protocol</a> (<code>mindblown-ai/1</code>) for brains that live there, or the Build module's <code>.mindblown.json</code> import for local brains.</p>
+      <p class="fine">Spec: <a href="./PROTOCOL.md">PROTOCOL.md</a> · contract: <a id="openapi-link" href="#">openapi.json</a> · clients: <a href="./sdk/mindblown-brain.js">mindblown-brain.js</a>, <a href="./sdk/mindblown_brain.py">mindblown_brain.py</a>, <a href="./sdk/mindblown-mcp.mjs">mindblown-mcp.mjs</a></p>
+    </div>
+  </section>
+</main>
+<footer class="foot"><span id="foot-gen"></span></footer>
+
+<script src="./sdk/mindblown-brain.js"></script>
+<script src="./api.js"></script>
+</body>
+</html>

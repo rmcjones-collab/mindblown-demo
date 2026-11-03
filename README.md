@@ -65,3 +65,21 @@ Give any page a `"parent": "<page id>"` and it becomes a sub-neuron: folded into
 ## For Claude Code
 
 Start with `CLAUDE.md` (rules and conventions) and `HANDOFF-CLAUDE-CODE.md` (module map, QA harness, review dispositions, backlog). QA: `node tools/qa-shot.cjs <url>` and `node tools/qa-depth.cjs <url>` against a local `python3 -m http.server`.
+
+## Brain API
+
+Every brain on this site is also readable as plain JSON (protocol `mindblown-brain/1`): discovery at
+[`/.well-known/mindblown.json`](.well-known/mindblown.json), one API root per brain (`/api/projects/v1/`, `/api/life/v1/`,
+`/api/programming/v1/`), a network manifest at `/api/network/v1/`, and an explorer with live calls and copy-ready snippets at
+[`/api/`](api/index.html). Documents: `brain`, `lobes`, `pages`, `pages/<id>`, `synapses`, `sources`, `links`, `graph`
+(JSON Graph Format), `search` (inverted index), `feed` (JSON Feed 1.1), `data`, `openapi`. Each `.json` has a `.js` twin for
+cross-origin browsers. JavaScript and Python clients and an MCP server for AI assistants are served from `/api/sdk/`.
+
+The tree is generated from the same data files the pages load, so it contains nothing the site does not already publish:
+
+```bash
+python3 ../mindblown-api/build_api.py          # reads api.config.json, rewrites api/ and .well-known/
+node ../mindblown-api/tools/qa-api.cjs .       # validates every document
+```
+
+Generator, spec and clients live in `rmcjones-collab/mindblown-api`; rerun the generator after any data builder.

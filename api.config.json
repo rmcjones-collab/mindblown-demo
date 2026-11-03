@@ -1,0 +1,12 @@
+{
+  "host": "https://mindblown.pplx.app",
+  "title": "MindBlown demo",
+  "network": { "id": "demo", "title": "MindBlown demo" },
+  "brains": [
+    { "id": "projects",    "data": "data.js",             "href": "index.html",       "title": "Projects",    "short": "Projects",    "color": "#ff8a3d", "fictional": true, "description": "A Perplexity Brain wiki exploded into lobes, neurons and synapses (fictional: Sam Vale of Port Ellery)." },
+    { "id": "life",        "data": "life-data.js",        "href": "life.html",        "title": "Life",        "short": "Life",        "color": "#4ade80", "fictional": true, "description": "Life domains as lobes; people, places, habits, events and accounts as neurons (fictional metadata only)." },
+    { "id": "programming", "data": "programming-data.js", "href": "programming.html", "title": "Programming", "short": "Programming", "color": "#60a5fa", "fictional": true, "description": "MindBlown applied to a wiki about programming: languages, paradigms, algorithms, systems, tools and pioneers, citing public docs." }
+  ],
+  "peers": ["https://deepanswers.pplx.app", "https://gtabrain.pplx.app", "https://brain42.pplx.app", "https://hubbrain.pplx.app"],
+  "license": null
+}

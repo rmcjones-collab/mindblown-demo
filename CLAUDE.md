@@ -4,6 +4,8 @@ MindBlown explodes a Perplexity Brain (knowledge wiki) into a zoomable D3 canvas
 
 Read `HANDOFF-CLAUDE-CODE.md` next.
 
+**Brain API.** `api/` and `.well-known/mindblown.json` are generated output (protocol `mindblown-brain/1`) from the same data files the pages load, produced by `build_api.py` in `rmcjones-collab/mindblown-api` using `api.config.json`. Do not hand-edit them; rerun the generator after any data builder and commit the result with the data. The explorer page, clients and spec inside `api/` are copies from that repository.
+
 ## The three repositories
 
 | Repo | Visibility | Data | Role |
