@@ -4,7 +4,7 @@ Date: 2026-11-02. Prepared by Perplexity Computer after the sub-neuron release a
 
 ## Ownership
 
-- **Claude Code owns:** the three demo generators, `index.html`/`life.html`/`programming.html` shell markup, README, and the QA harness in `tools/`. Renderer changes (`app.js`, `style.css`) are made in `mindblown` and copied here unchanged.
+- **Claude Code owns:** the three demo generators, the home page (`index.html`, `site.css`, `site.js`), `projects.html`/`life.html`/`programming.html` shell markup, README, and the QA harness in `tools/`. Renderer changes (`app.js`, `style.css`) are made in `mindblown` and copied here unchanged.
 - **Owner owns:** publishing to https://mindblown.pplx.app and anything that changes what is public.
 
 ## State at handoff
@@ -17,7 +17,8 @@ Date: 2026-11-02. Prepared by Perplexity Computer after the sub-neuron release a
 
 | File | Purpose |
 |---|---|
-| `index.html` | Projects brain shell; `nav.brains` links to `life.html` and `programming.html` |
+| `index.html`, `site.css`, `site.js` | MindBlown home page: hero, four module cards with dataset counts (update them when a generator changes), how a brain unfolds, Build feature, own-brain steps, footer. `site.js` draws a procedural background brain on a fixed canvas (pauses when hidden, static under reduced motion). The module shells' brand mark links back here. |
+| `projects.html` | Projects brain shell; `nav.brains` (Home · Projects, Life, Programming, Build · GTA network, 42) feeds the dropdown that `app.js` builds. Build's Explode fetches this file (the home link and nav are stripped before it goes into the iframe) |
 | `life.html` | Life brain shell; identical markup except the `.on` link and `<script src="./life-data.js">` |
 | `build.html`, `build.js`, `build.css`, `build-questions.js` | Build module: interview-driven brain builder with its own canvas renderer, IndexedDB storage, Save/Open JSON (files embedded as base64), Questions manager, Explode-to-explorer iframe. The document is a **network** (`{ v: 2, active, brains: [...], links: [...] }`): `brains[0]` is the root, any brain may carry `origin: { brain, sub }` (the neuron it grew from; that neuron carries `brainId`), and `links` are the user's connections `{ a: { b, s }, b: { b, s }, label, notes, strength }` across brains. `sanitizeNet()` drops dangling ends, origin loops and unknown `brainId`s. `toDataset()` emits the renderer's multi-brain form (namespaced ids, `self: true` hub lobes, `brains`/`centers`) when there is more than one brain. Questions/categories/templates live in `build-questions.js`. |
 | `build_demo_data.py` | fictional Projects brain: 70 pages (20 sub-neurons under Tidewatch 7, Hollow Pines 7, Orbit Kitchen 6), 616 synapses, 94 sources. Prefix map decides parents. Code host is `git.example.test`. |
@@ -40,7 +41,7 @@ Fictional cast and hosts that must not change meaning: Sam Vale (`sam.vale@examp
 
 ## Demo-specific backlog
 
-1. **Brain switcher data-driven.** `nav.brains` is hand-written in both HTML files. If a third brain is added, emit the nav from a `D.brains[]` list or a tiny shared `brains.js`. Check: adding an entry in one place updates both pages.
+1. **Brain switcher data-driven.** `nav.brains` is hand-written in the four module shells and `.site-nav` in `index.html`. If a third brain is added, emit the nav from a `D.brains[]` list or a tiny shared `brains.js`. Check: adding an entry in one place updates both pages.
 2. **Dream log lobe in the Projects demo.** The 15 hidden "day" pages could become sub-neurons of one "Dream log" neuron (generator change, no renderer change). Check: lobe list shows one neuron with 15 sub-neurons; stats still count them separately.
 3. **Life demo money lobe.** `money/overview` has 6 children; this is the best place to test the label-collision and mobile-ring fixes from the main backlog. Check: screenshot at 390×844, 0.9×.
 4. **README screenshots.** Regenerate the README images from `tools/qa-shot.cjs` output once the label fix lands.

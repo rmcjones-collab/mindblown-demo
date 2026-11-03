@@ -6,9 +6,10 @@ MindBlown turns a Perplexity Brain (the `memory/knowledge` wiki) into a zoomable
 - **Neurons** — one node per wiki page, sized by how many notes it holds.
 - **Synapses** — every `- **Lead** — text` bullet becomes its own particle orbiting its neuron; zoom in (or flip "Explode every neuron") to read them, follow `[[wikilinks]]` between pages, and trace `[cite:n]` sources back to sessions, GitHub PRs and web pages.
 
-**This public repository ships three fictional demo brains** (two for "Sam Vale", one about programming) **plus an empty one you grow yourself**:
+**This public repository ships a home page, three fictional demo brains** (two for "Sam Vale", one about programming) **and an empty one you grow yourself**:
 
-- `index.html` + `data.js` — the **Projects** brain (a Perplexity Brain wiki exploded into lobes, neurons and synapses).
+- `index.html` + `site.css` + `site.js` — the **MindBlown home page**: what the project is, the four modules with their counts, how a brain unfolds, the Build module and how to point MindBlown at your own wiki. Plain scrolling page with a procedural canvas background; it does not load `style.css` or `app.js`.
+- `projects.html` + `data.js` — the **Projects** brain (a Perplexity Brain wiki exploded into lobes, neurons and synapses).
 - `life.html` + `life-data.js` — the **Life** brain: lobes are life domains (family, crew, work, studio, money, home, body, play), neurons are people, places, habits, events and accounts, and neurons can go **one level deeper** into sub-neurons that unfold as you zoom. Synapses cite fictional mail metadata, calendar entries, playlists, bank *category names*, memory notes and Brain pages.
 - `programming.html` + `programming-data.js` — the **Programming** brain: an example of MindBlown applied to a wiki about programming. Lobes are Languages, Paradigms & Types, Data Structures & Algorithms, Systems, Tools & Craft and Pioneers & History, plus a hidden study log grouped by week. 48 neurons, 46 sub-neurons (e.g. TypeScript/Node/event loop under JavaScript, quicksort/mergesort/Timsort under Sorting), 286 synapses citing real public docs, specs, Wikipedia articles and GitHub repositories, plus fictional study sessions.
 - `build.html` + `build.js` + `build.css` + `build-questions.js` — **Build**: start from an empty brain and grow your own. The page asks your name first, then keeps asking questions that build a profile (17 starter categories, ~120 questions, plus follow-ups spawned from your answers). Every question and category can be switched off; you can add your own categories (each gets a generated question set) and your own questions; starred neurons and interests are asked about more. Every category and neuron holds answers, notes, links, pictures and files. You draw your own **connections** between any two neurons (a label such as "mother of", notes and a strength; pick the target from a list or click it on the canvas), and any neuron can **grow into a brain of its own**: a family member added as a neuron becomes the centre of a second brain with its own categories, questions and files, tied back to the neuron by a synapse. A header switch moves between the brains of the network; **Explode** shows them all on one screen. The network lives in your browser (IndexedDB) and can be saved to / opened from a single `<name>.mindblown.json` file; **Explode** opens it in the full explorer, and **Export as MindBlown dataset** writes a `data.js`-compatible file. Nothing is uploaded anywhere.
@@ -24,7 +25,7 @@ python3 -m http.server 8123
 # open http://localhost:8123
 ```
 
-It is a static site: `index.html`, `style.css`, `app.js` (D3 v7, canvas) and `data.js`.
+It is a static site: `index.html` (home), the module shells (`projects.html`, `life.html`, `programming.html`, `build.html`), `style.css`, `app.js` (D3 v7, canvas) and the data files. The brain switcher in every module header starts with a Home entry, and the MindBlown mark links home too.
 
 ## Regenerate the demo data
 

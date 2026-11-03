@@ -1,6 +1,6 @@
 # CLAUDE.md — MindBlown demo (public)
 
-MindBlown explodes a Perplexity Brain (knowledge wiki) into a zoomable D3 canvas: **lobes** → **neurons** → **sub-neurons** (one level deeper via `parent`) → **synapses** → **sources**. This repository is the **public, fictional** demo published at https://mindblown.pplx.app: two brains for an invented person, Sam Vale of Port Ellery (`index.html` + `data.js` for Projects, `life.html` + `life-data.js` for Life). Static site, no build step, no backend, no framework. A third page, `build.html` (+ `build.js`, `build.css`, `build-questions.js`), is the **Build** module: an interview that grows a brain from scratch in the browser (IndexedDB + Save/Open JSON). It has its own live-growing canvas renderer and does **not** use `app.js`, except that **Explode** loads `index.html` into an iframe (`srcdoc`) with the generated dataset injected in place of `data.js` (the multi-brain network form when the user has grown more than one brain). Users draw their own connections between neurons and can grow any neuron into a brain of its own; the stored document is a network of brains plus links (see `HANDOFF-CLAUDE-CODE.md`). All user text is escaped before reaching `innerHTML`; files are stored as Blobs and never leave the browser.
+MindBlown explodes a Perplexity Brain (knowledge wiki) into a zoomable D3 canvas: **lobes** → **neurons** → **sub-neurons** (one level deeper via `parent`) → **synapses** → **sources**. This repository is the **public, fictional** demo published at https://mindblown.pplx.app: two brains for an invented person, Sam Vale of Port Ellery (`projects.html` + `data.js` for Projects, `life.html` + `life-data.js` for Life), plus `programming.html` + `programming-data.js`. `index.html` is the **home page** (`site.css`, `site.js`): a normal scrolling document that links to the four modules; it does not load `style.css` or `app.js`, and its canvas background is procedural (no data). Static site, no build step, no backend, no framework. A third page, `build.html` (+ `build.js`, `build.css`, `build-questions.js`), is the **Build** module: an interview that grows a brain from scratch in the browser (IndexedDB + Save/Open JSON). It has its own live-growing canvas renderer and does **not** use `app.js`, except that **Explode** loads `projects.html` into an iframe (`srcdoc`) with the generated dataset injected in place of `data.js` (the multi-brain network form when the user has grown more than one brain). Users draw their own connections between neurons and can grow any neuron into a brain of its own; the stored document is a network of brains plus links (see `HANDOFF-CLAUDE-CODE.md`). All user text is escaped before reaching `innerHTML`; files are stored as Blobs and never leave the browser.
 
 Read `HANDOFF-CLAUDE-CODE.md` next.
 
@@ -30,8 +30,8 @@ Read `HANDOFF-CLAUDE-CODE.md` next.
 python3 -m http.server 8124                 # serve from the repo root
 python3 build_demo_data.py                  # regenerate data.js      (fictional Projects brain)
 python3 build_life_demo_data.py             # regenerate life-data.js (fictional Life brain)
-node tools/qa-shot.cjs  http://localhost:8124/index.html && node tools/qa-shot.cjs  http://localhost:8124/life.html
-node tools/qa-depth.cjs http://localhost:8124/index.html && node tools/qa-depth.cjs http://localhost:8124/life.html
+node tools/qa-shot.cjs  http://localhost:8124/projects.html && node tools/qa-shot.cjs  http://localhost:8124/life.html
+node tools/qa-depth.cjs http://localhost:8124/projects.html && node tools/qa-depth.cjs http://localhost:8124/life.html
 ```
 
 Both generators are deterministic (seeded `random`); regenerate and commit the data files together with the generator change.
