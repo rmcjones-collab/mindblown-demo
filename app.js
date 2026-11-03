@@ -339,7 +339,7 @@
     W = canvas.clientWidth; H = canvas.clientHeight;
     canvas.width = W * dpr; canvas.height = H * dpr;
     // the karyogram picks its row count from the viewport aspect, so once the shape drifts far from the one it was laid out for (a rotation, or a long window drag) it re-lays out and refits
-    if (!first && genome() && Math.abs(W / Math.max(1, H) - layoutAspect) > 0.25) { layoutGenome(false); refreshForces(); rebuild(false); sim.alpha(0.6).restart(); setTimeout(() => fitAll(500), 350); }   // fit once the pages have moved toward the new loci, as the G toggle does
+    if (!first && genome() && Math.abs(W / Math.max(1, H) - layoutAspect) > 0.25) { pages.forEach(n => { if (n.pinned) { n.pinned = false; n.fx = null; n.fy = null; } }); layoutGenome(false); refreshForces(); rebuild(false); sim.alpha(0.6).restart(); setTimeout(() => fitAll(500), 350); }   // fit once the pages have moved toward the new loci, as the G toggle does
   }
   window.addEventListener('resize', resize);
   resize();
@@ -374,6 +374,7 @@
   }
   function fitAll(dur = 900) {
     const { kk, tx, ty } = fitTransform();
+    if (!(kk > 0)) return;   // a very short canvas can make the fitted scale non-positive, which would mirror the map
     d3.select(canvas).transition().duration(dur).ease(d3.easeCubicInOut).call(zoom.transform, d3.zoomIdentity.translate(tx, ty).scale(kk));
   }
   function zoomTo(n, kk, dur = 1100) {
