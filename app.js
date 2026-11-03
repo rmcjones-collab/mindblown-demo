@@ -131,7 +131,89 @@
   let depthF = 0, depthTarget = 0;       // 0 sub-neurons folded into parents → 1 unfolded
   let forceExplode = false, showCocite = false;
   let hover = null, selected = null, pulseSyn = null;
-  let labelsOn = true, labelF = 1;        // labels toggle (L); when off, only the hovered neuron or lobe keeps its label
+  // labels toggle (L); when off, only the hovered neuron or lobe keeps its label. A page may start with labels off by setting
+  // window.MINDBLOWN_OPTIONS = { labels: false } before app.js loads; the toggle, the lobes-panel switch and the L key still work.
+  const OPT = window.MINDBLOWN_OPTIONS || {};
+  let labelsOn = OPT.labels !== false, labelF = labelsOn ? 1 : 0;
+  // layout (G): 'neural' is the force-directed brain; 'genome' arranges the same brain the way a genome is mapped, as a karyogram.
+  // A page may start in it with window.MINDBLOWN_OPTIONS = { layout: 'genome' } or a #layout=genome hash; the tool button, the switch and G toggle it.
+  let layout = OPT.layout === 'genome' || /[#&]layout=genome\b/.test(location.hash) ? 'genome' : 'neural';
+  const genome = () => layout === 'genome';
+
+  // ---------- genome layout: every brain mapped like a karyotype ----------
+  // Chromosomes are the brains on a network screen (plus one per shared lobe) and the lobes on a single brain. Each is a vertical bar whose
+  // length follows its content as a chromosome's follows its base pairs; bands are the lobes (network) or the neurons themselves, painted in
+  // alternating density like G-banding; the hub neuron sits in the centromere constriction, placed submetacentric (38 % down) like most human
+  // chromosomes; sub-neurons line up beside their parent on the left, synapses fan out to the right. Nothing here names a dataset: it is built
+  // from lobes[].brain / self and D.brains alone, so any brain lays out the same way.
+  const G = { barW: 44, gapX: 170, rowGap: 300, hubGap: 420 };
+  const chromos = [];
+  const chromoOf = {};   // lobe id → chromosome
+  if (brainsIn) {
+    brainsIn.forEach(b => {
+      const hub = pages.find(p => p.isCenter && p.lobe === b.self) || pages.find(p => p.lobe === b.self && !isChild(p)) || null;
+      const c = { id: b.id, name: b.short || b.title, color: b.color || lobeById[b.self]?.color || '#9aa', hub, segs: lobes.filter(l => l.brain === b.id) };
+      chromos.push(c); c.segs.forEach(l => { chromoOf[l.id] = c; });
+    });
+    lobes.filter(l => !l.brain && !selfLobe(l)).forEach(l => { const c = { id: l.id, name: l.name, color: l.color, hub: null, segs: [l] }; chromos.push(c); chromoOf[l.id] = c; });
+  } else lobes.filter(l => !selfLobe(l)).forEach(l => { const c = { id: l.id, name: l.name, color: l.color, hub: null, segs: [l] }; chromos.push(c); chromoOf[l.id] = c; });
+  const sameChromo = (a, b) => chromoOf[a.lobe] && chromoOf[a.lobe] === chromoOf[b.lobe];
+  // The map is static: slots and columns are sized for the unfolded, exploded state up front, so zooming never shifts a locus.
+  // the room a locus needs along the bar: its own body (drawn ~1.6× at karyogram zoom) or its sub-neuron column, whichever is taller
+  const kidPitch = c => 2 * c.r * 1.5 + 8;
+  const slotH = p => Math.max(2 * p.r * 1.6 + 8, d3.sum(p.children.filter(pageOn), kidPitch), 24);
+  // how far a neuron's synapse ladder reaches sideways once exploded: one row, 9 units a rung
+  const SYN_PITCH = 9;
+  const synReach = p => p.nSyn ? p.r * 1.3 + 8 + p.nSyn * SYN_PITCH : 0;
+  // a sub-neuron's slot is an offset from its parent; anchorX/Y scale it by depthF so children unfold out of the bar into their column
+  const placeKids = p => { const kids = p.children.filter(pageOn), kh = d3.sum(kids, kidPitch); let ky = p.gy - kh / 2; kids.forEach(x => { const ph = kidPitch(x); x.gdx = -(G.barW / 2 + 16 + x.r * 1.5); x.gdy = ky + ph / 2 - p.gy; x.gx = p.gx + x.gdx; x.gy = p.gy + x.gdy; ky += ph; }); };
+  function layoutGenome(snap) {
+    chromos.forEach(c => {
+      const segs = c.segs.map(l => ({ l, ps: pages.filter(p => p.lobe === l.id && p !== c.hub && !isChild(p) && pageOn(p)).sort((a, b) => b.deg - a.deg || a.title.localeCompare(b.title)) })).filter(s => s.ps.length);
+      const loci = segs.flatMap(s => s.ps), hs = loci.map(slotH), total = d3.sum(hs);
+      let acc = 0, cIdx = loci.length;
+      for (let i = 0; i < loci.length; i++) { if (acc + hs[i] / 2 > total * 0.38) { cIdx = i; break; } acc += hs[i]; }
+      c.hubOn = c.hub && pageOn(c.hub) ? c.hub : null;
+      c.hubH = c.hubOn ? Math.max(2 * c.hubOn.r * 1.6 + 16, d3.sum(c.hubOn.children.filter(pageOn), kidPitch)) : loci.length > 1 ? 16 : 0;
+      c.loci = loci; c.hs = hs; c.cIdx = cIdx;
+      c.above = d3.sum(hs.slice(0, cIdx)) + c.hubH / 2; c.below = d3.sum(hs.slice(cIdx)) + c.hubH / 2;
+      const withHub = c.hubOn ? [...loci, c.hubOn] : loci;   // the hub and its sub-neurons share the chromosome's horizontal extent
+      c.reachR = Math.max(0, ...withHub.map(synReach));
+      c.reachL = Math.max(0, ...withHub.map(p => { const kids = p.children.filter(pageOn); return kids.length ? 24 + Math.max(...kids.map(x => 2 * x.r * 1.5 + synReach(x))) : 0; }));
+      c.on = loci.length > 0 || !!c.hubOn;
+    });
+    // a karyogram puts many chromosomes on two or three rows, centromeres aligned along each row; the row count that brings the whole
+    // map closest to a landscape screen wins, so a brain with a handful of lobes stays on one row and a 26-brain network takes two or three
+    const on = chromos.filter(c => c.on), n = on.length;
+    const oneRowW = d3.sum(on, c => c.reachL + G.barW + c.reachR + G.gapX), tallest = Math.max(0, ...on.map(c => c.above + c.below)), hubExtra = brainsIn ? 0 : G.hubGap;
+    const target = Math.max(0.7, Math.min(2.2, (W || 1600) / (H || 900)));   // aim the map at the screen's shape, so a phone gets a taller karyogram
+    const aspectOff = r => Math.abs(Math.log((oneRowW / r) / (hubExtra + tallest * r + G.rowGap * (r - 1)) / target));
+    let rows = 1; for (let r = 2; r <= Math.min(4, n); r++) if (aspectOff(r) < aspectOff(rows)) rows = r;
+    const per = Math.ceil(n / rows);
+    let rowTop = 0; const spans = [];
+    for (let r = 0; r < rows; r++) {
+      const row = on.slice(r * per, (r + 1) * per); if (!row.length) break;
+      const above = Math.max(...row.map(c => c.above)), below = Math.max(...row.map(c => c.below));
+      let x = 0; row.forEach(c => { x += c.reachL + G.barW / 2; c.x = x; c.cy = rowTop + above; x += G.barW / 2 + c.reachR + G.gapX; });
+      const shift = (x - G.gapX) / 2; row.forEach(c => { c.x -= shift; });
+      spans.push({ x0: -shift, x1: x - G.gapX - shift });
+      rowTop += above + below + G.rowGap;
+    }
+    on.forEach(c => {
+      let y = c.cy - c.above; c.top = y;
+      c.loci.forEach((p, i) => {
+        if (i === c.cIdx) y += c.hubH;
+        const h = c.hs[i]; p.gx = c.x; p.gy = y + h / 2; y += h;
+        placeKids(p);
+      });
+      if (c.cIdx >= c.loci.length) y += c.hubH;
+      c.bot = y;
+      if (c.hubOn) { c.hubOn.gx = c.x; c.hubOn.gy = c.cy; placeKids(c.hubOn); }
+    });
+    // a single brain's hub (and any other self-lobe neuron) sits above the karyogram, the nucleus the chromosomes came out of
+    if (!brainsIn) { const hubs = pages.filter(p => isSelf(p) && !isChild(p) && pageOn(p)), span = spans[0] || { x0: 0, x1: 0 }, top = on.length ? Math.min(...on.map(c => c.top)) : 0; hubs.forEach((p, i) => { p.gx = (span.x0 + span.x1) / 2 + (i - (hubs.length - 1) / 2) * 120; p.gy = top - G.hubGap; placeKids(p); }); }
+    if (snap) pages.forEach(p => { if (p.gx !== undefined) { p.x = isChild(p) ? p.parent.gx : p.gx; p.y = isChild(p) ? p.parent.gy : p.gy; p.vx = p.vy = 0; } });
+  }
   let mouseW = null;                      // cursor in world units, for lobe hover while labels are off
   // tools: 'select' = left-drag draws a marquee and moves neurons; 'pan' = left-drag pans (the classic behaviour)
   let mode = 'select', spaceDown = false;
@@ -144,6 +226,7 @@
   // a sub-neuron is shown only while both its own lobe and its parent's lobe are on
   const pageOn = p => lobeOn[p.lobe] && (!p.parent || lobeOn[p.parent.lobe]);
   const visible = n => n.kind === 'page' ? pageOn(n) : n.kind === 'syn' ? pageOn(pageById[n.page]) : n.pageNodes.some(pageOn);
+  if (genome()) layoutGenome(true);
 
   // ---------- simulation ----------
   // a link that leaves a brain's own lobes (into a shared lobe or another brain) is long and slack on the network screen
@@ -158,6 +241,9 @@
     return 160;
   };
   const linkStrength = l => {
+    // in the genome layout every neuron is held at its locus and every synapse at its rung, so connections are drawn but do not pull;
+    // only a source's tether to its (first) neuron remains, so the sparks stay with their citation
+    if (genome() && l.kind !== 'sr') return 0;
     if (l.kind === 'pp') return l.source.type === 'day' || l.target.type === 'day' ? 0.02 : crossBrain(l) ? 0.015 : l.source.lobe !== l.target.lobe ? 0.08 : 0.3;
     if (l.kind === 'st') return 0.15;
     if (l.kind === 'sx') return 0.03;
@@ -165,21 +251,28 @@
     if (l.kind === 'pc') return 0.6;
     return 0.01;
   };
-  const charge = n => n.isCenter ? -1200 : isChild(n) ? -(30 + n.nSyn * 3) * depthF - 1 : -200 - n.nSyn * 7 - n.children.length * 40;
+  const charge = n => genome() ? -2 : n.isCenter ? -1200 : isChild(n) ? -(30 + n.nSyn * 3) * depthF - 1 : -200 - n.nSyn * 7 - n.children.length * 40;
   // pages repel only pages; synapses and sources are held by tethers + collision, so they orbit instead of being blasted away
   const pageCharge = d3.forceManyBody().strength(charge).theta(0.9).distanceMax(900);
   const chargeForce = Object.assign(a => pageCharge(a), { initialize: (nodes, rnd) => pageCharge.initialize(nodes.filter(n => n.kind === 'page'), rnd), strength: f => (pageCharge.strength(f), chargeForce) });
-  const collideR = n => n.kind === 'page' ? n.r + 6 : n.kind === 'syn' ? 1 + 4 * explodeF : 1 + 3.5 * explodeF;
+  // genome layout: a folded sub-neuron sits inside its parent, so it must not collide with it until it has unfolded
+  const collideR = n => n.kind === 'page' ? (genome() ? (isChild(n) ? depthF : 1) * (n.r + 4) : n.r + 6) : n.kind === 'syn' ? (genome() ? 2.5 : 1 + 4 * explodeF) : 1 + 3.5 * explodeF;
   // page-only collision keeps whole synapse clouds from overlapping once exploded
-  const pageCollideR = n => isChild(n) ? depthF * (n.r + 6 + explodeF * (n.nSyn ? orbitR(n) + 8 : 0)) : n.r + 10 + explodeF * (n.nSyn ? orbitR(n) + 14 : 0) + depthF * (n.children.length ? 20 : 0);
+  const pageCollideR = n => genome() ? (isChild(n) ? depthF : 1) * (n.r + 2) : isChild(n) ? depthF * (n.r + 6 + explodeF * (n.nSyn ? orbitR(n) + 8 : 0)) : n.r + 10 + explodeF * (n.nSyn ? orbitR(n) + 14 : 0) + depthF * (n.children.length ? 20 : 0);
   const pageCollide = d3.forceCollide().radius(pageCollideR).strength(0.7).iterations(2);
   const pageCollideForce = Object.assign(a => pageCollide(a), { initialize: (nodes, rnd) => pageCollide.initialize(nodes.filter(n => n.kind === 'page'), rnd), radius: f => (pageCollide.radius(f), pageCollideForce) });
   // orbit force: each synapse seeks an evenly spaced slot around its neuron (the dandelion explosion)
   function orbitForce(alpha) {
     const st = 0.3 * alpha;
+    const g = genome();
     for (const n of activeNodes) {
       if (n.kind !== 'syn') continue;
       const p = pageById[n.page], m = p.nSyn;
+      if (g) {   // genome layout: a ladder of synapses on the locus line, to the right of the bar (to the left of a sub-neuron)
+        const side = isChild(p) ? -1 : 1;
+        const gx = p.x + side * ((p.r * 1.3 + 8 + n.ordinal * SYN_PITCH) * explodeF + 2);
+        n.vx += (gx - n.x) * st; n.vy += (p.y - n.y) * st; continue;
+      }
       const a = p.spin + (n.ordinal / m) * Math.PI * 2;
       const rr = (orbitR(p) + (n.ordinal % 2 ? 7 : -5)) * explodeF + 2;
       n.vx += (p.x + Math.cos(a) * rr - n.x) * st; n.vy += (p.y + Math.sin(a) * rr - n.y) * st;
@@ -188,7 +281,7 @@
 
   function childOrbitForce(alpha) {
     const st = 0.25 * alpha * depthF;
-    if (st <= 0) return;
+    if (st <= 0 || genome()) return;   // genome layout: sub-neurons are anchored to their own slot instead
     for (const n of activeNodes) {
       if (!isChild(n)) continue;
       const p = n.parent, m = p.children.length, i = p.children.indexOf(n);
@@ -198,7 +291,10 @@
   }
   const lobeSize = {}; pages.forEach(p => { if (!isChild(p)) lobeSize[p.lobe] = (lobeSize[p.lobe] || 0) + 1; });
   // on the shared network screen the lobes hold their ground harder, otherwise the many links into the shared neurons drag every brain into the middle
-  const anchorStrength = n => n.kind !== 'page' ? 0 : isChild(n) ? 0.02 : isSelf(n) ? (brainsIn ? 0.9 : 0.6) : n.type === 'day' ? 0.5 : (lobeSize[n.lobe] <= 4 ? 0.55 : lobeSize[n.lobe] <= 10 ? 0.4 : 0.22) * (brainsIn ? 1.7 : 1);
+  // genome layout: every neuron (sub-neurons included) is pulled firmly onto its locus; the lobe anchors are not used
+  const anchorX = n => genome() && n.gx !== undefined ? (isChild(n) ? n.parent.gx + depthF * n.gdx : n.gx) : anchor[n.lobe]?.x ?? 0;
+  const anchorY = n => genome() && n.gy !== undefined ? (isChild(n) ? n.parent.gy + depthF * n.gdy : n.gy) : anchor[n.lobe]?.y ?? 0;
+  const anchorStrength = n => n.kind !== 'page' ? 0 : genome() ? (n.gx !== undefined ? 0.9 : 0) : isChild(n) ? 0.02 : isSelf(n) ? (brainsIn ? 0.9 : 0.6) : n.type === 'day' ? 0.5 : (lobeSize[n.lobe] <= 4 ? 0.55 : lobeSize[n.lobe] <= 10 ? 0.4 : 0.22) * (brainsIn ? 1.7 : 1);
   const sim = d3.forceSimulation()
     .force('link', d3.forceLink().id(d => d.id).distance(linkDist).strength(linkStrength))
     .force('charge', chargeForce)
@@ -206,18 +302,21 @@
     .force('orbit', orbitForce)
     .force('childOrbit', childOrbitForce)
     .force('pageCollide', pageCollideForce)
-    .force('x', d3.forceX(n => anchor[n.lobe]?.x ?? 0).strength(anchorStrength))
-    .force('y', d3.forceY(n => anchor[n.lobe]?.y ?? 0).strength(anchorStrength))
+    .force('x', d3.forceX(anchorX).strength(anchorStrength))
+    .force('y', d3.forceY(anchorY).strength(anchorStrength))
     .alphaDecay(0.03).velocityDecay(0.35)
     .stop();
 
   function rebuild(warm) {
+    if (genome()) layoutGenome(false);
     const vp = pages.filter(visible);
     const vs = syns.filter(visible);
     const vr = srcs.filter(visible);
     activeNodes = [...vp, ...vs, ...vr];
     const on = new Set(activeNodes);
-    activeLinks = [...pageLinks, ...childTethers, ...synTethers, ...synCross, ...srcTethers, ...(showCocite ? cociteLinks : [])]
+    // genome layout: a source cited by several neurons would pull them together, so it is tethered to its first neuron only
+    const srcT = genome() ? srcTethers.filter(l => l.source.pageNodes.find(on.has, on) === l.target) : srcTethers;
+    activeLinks = [...pageLinks, ...childTethers, ...synTethers, ...synCross, ...srcT, ...(showCocite ? cociteLinks : [])]
       .filter(l => on.has(l.source) && on.has(l.target));
     sim.nodes(activeNodes);
     sim.force('link').links(activeLinks);
@@ -226,13 +325,19 @@
     updateStats();
   }
   // D3 caches per-node strengths/radii when an accessor is set, so re-set them whenever explodeF/depthF move
-  function refreshForces() { sim.force('link').distance(linkDist); sim.force('charge').strength(charge); sim.force('collide').radius(collideR); sim.force('pageCollide').radius(pageCollideR); }
+  function refreshForces() {
+    sim.force('link').distance(linkDist).strength(linkStrength); sim.force('charge').strength(charge); sim.force('collide').radius(collideR); sim.force('pageCollide').radius(pageCollideR);
+    sim.force('x').x(anchorX).strength(anchorStrength); sim.force('y').y(anchorY).strength(anchorStrength);
+  }
 
   // ---------- canvas ----------
   function resize() {
+    const first = W === 0, aspectBefore = W / Math.max(1, H);
     dpr = Math.min(window.devicePixelRatio || 1, 2);
     W = canvas.clientWidth; H = canvas.clientHeight;
     canvas.width = W * dpr; canvas.height = H * dpr;
+    // the karyogram picks its row count from the viewport aspect, so a rotation (landscape ↔ portrait) re-lays it out and refits
+    if (!first && genome() && Math.abs(W / Math.max(1, H) - aspectBefore) > 0.25) { layoutGenome(false); refreshForces(); rebuild(false); sim.alpha(0.6).restart(); setTimeout(() => fitAll(500), 350); }   // fit once the pages have moved toward the new loci, as the G toggle does
   }
   window.addEventListener('resize', resize);
   resize();
@@ -257,10 +362,10 @@
   function fitTransform() {
     const vp = pages.filter(p => visible(p) && !isChild(p));
     const xs = vp.map(p => p.x), ys = vp.map(p => p.y);
-    const mx = brainsIn ? 260 : 150, my = brainsIn ? 260 : 170;
+    const mx = genome() ? 120 : brainsIn ? 260 : 150, my = genome() ? 150 : brainsIn ? 260 : 170;
     const minX = Math.min(...xs) - mx, maxX = Math.max(...xs) + mx, minY = Math.min(...ys) - my, maxY = Math.max(...ys) + my;
     const padL = window.innerWidth <= 900 ? 0 : 230; // keep the fitted brain clear of the lobes legend on desktop
-    const lx = brainsIn ? Math.min(210, W * 0.16) : 0, ly = brainsIn ? 30 : 0;   // pixels reserved for titles beside/above the outer lobes
+    const lx = brainsIn && !genome() ? Math.min(210, W * 0.16) : 0, ly = genome() ? 40 : brainsIn ? 30 : 0;   // pixels reserved for titles beside/above the outer lobes (above the bars in the genome layout)
     const kk = Math.min((W - 60 - padL - 2 * lx) / (maxX - minX), (H - (brainsIn ? 150 : 200) - 2 * ly) / (maxY - minY)) * 0.96;
     const cx = (minX + maxX) / 2, cy = (minY + maxY) / 2;
     return { kk, tx: padL + (W - padL) / 2 - cx * kk, ty: H / 2 + 12 - cy * kk };
@@ -293,6 +398,70 @@
     pulses.push({ l, t: 0, speed: (fast ? 0.028 : 0.009) + Math.random() * 0.006, dir: Math.random() < 0.5 ? 1 : -1 });
   }
   let lastPulse = 0;
+
+  // ---------- genome layout drawing ----------
+  // connections bend in the genome layout: along one chromosome they bow out to the right like a Circos ribbon, between chromosomes they arch
+  const ctrlOf = l => {
+    if (!genome()) return null;
+    const a = l.source, b = l.target, mx = (a.x + b.x) / 2, my = (a.y + b.y) / 2;
+    if (sameChromo(a, b)) return [mx + G.barW / 2 + 22 + Math.abs(b.y - a.y) * 0.25, my];
+    return [mx, my - Math.min(260, 14 + Math.abs(b.x - a.x) * 0.16)];
+  };
+  const linkPoint = (l, s, e, t) => { const c = ctrlOf(l); if (!c) return [s.x + (e.x - s.x) * t, s.y + (e.y - s.y) * t]; const u = 1 - t; return [u * u * s.x + 2 * u * t * c[0] + t * t * e.x, u * u * s.y + 2 * u * t * c[1] + t * t * e.y]; };
+  // break a chromosome title into up to three lines that fit the column; the last line is cut with an ellipsis
+  function wrapTitle(text, maxW, lines = 3) {
+    const words = String(text).split(/\s+/), out = []; let cur = '';
+    for (const w of words) { const t = cur ? cur + ' ' + w : w; if (ctx.measureText(t).width <= maxW || !cur) cur = t; else { out.push(cur); cur = w; } }
+    if (cur) out.push(cur);
+    if (out.length > lines) { out.length = lines; let last = out[lines - 1]; while (last.length > 1 && ctx.measureText(last + '…').width > maxW) last = last.slice(0, -1); out[lines - 1] = last + '…'; }
+    return out;
+  }
+  function roundRect(x, y, w, h, r) { r = Math.min(r, w / 2, h / 2); ctx.beginPath(); ctx.moveTo(x + r, y); ctx.arcTo(x + w, y, x + w, y + h, r); ctx.arcTo(x + w, y + h, x, y + h, r); ctx.arcTo(x, y + h, x, y, r); ctx.arcTo(x, y, x + w, y, r); ctx.closePath(); }
+  function drawKaryogram(titleVis, tl) {
+    const sw = px => px / k, hw = G.barW / 2;
+    const mobile = window.innerWidth <= 900;
+    chromos.forEach(c => {
+      if (!c.on) return;
+      const x = c.x, pTop = c.top, pBot = c.cy - c.hubH / 2, qTop = c.cy + c.hubH / 2, qBot = c.bot;
+      const arms = [[pTop, pBot], [qTop, qBot]].filter(([a, b]) => b - a > 1);
+      // arms: rounded bars, banded by locus in the lobe colour at alternating density (the G-banding), clipped to the arm shape
+      arms.forEach(([a, b]) => {
+        roundRect(x - hw, a, G.barW, b - a, hw);
+        ctx.fillStyle = rgba(c.color, 0.08); ctx.fill();
+        ctx.save(); ctx.clip();
+        let y = c.top; c.loci.forEach((p, i) => { if (i === c.cIdx) y += c.hubH; const h = c.hs[i]; if (y < b && y + h > a) { ctx.fillStyle = rgba(lobeColor(p), i % 2 ? 0.30 : 0.14); ctx.fillRect(x - hw, Math.max(y, a), G.barW, Math.min(y + h, b) - Math.max(y, a)); } y += h; });
+        ctx.restore();
+        roundRect(x - hw, a, G.barW, b - a, hw); ctx.lineWidth = sw(1); ctx.strokeStyle = rgba(c.color, 0.45); ctx.stroke();
+      });
+      // centromere: a waist between the arms, where the hub neuron sits on a network screen
+      if (arms.length === 2) {
+        const wy = c.hubH / 2, wx = hw * (c.hubOn ? 0.55 : 0.4);
+        ctx.beginPath(); ctx.moveTo(x - hw + sw(0.5), pBot); ctx.bezierCurveTo(x - hw, pBot + wy * 0.6, x - wx, c.cy - wy * 0.35, x - wx, c.cy); ctx.bezierCurveTo(x - wx, c.cy + wy * 0.35, x - hw, qTop - wy * 0.6, x - hw + sw(0.5), qTop);
+        ctx.lineTo(x + hw - sw(0.5), qTop); ctx.bezierCurveTo(x + hw, qTop - wy * 0.6, x + wx, c.cy + wy * 0.35, x + wx, c.cy); ctx.bezierCurveTo(x + wx, c.cy - wy * 0.35, x + hw, pBot + wy * 0.6, x + hw - sw(0.5), pBot); ctx.closePath();
+        ctx.fillStyle = rgba(c.color, 0.16); ctx.fill(); ctx.lineWidth = sw(1); ctx.strokeStyle = rgba(c.color, 0.45); ctx.stroke();
+      }
+      // p / q arm marks, like a cytogenetic map
+      if (arms.length === 2 && k > 0.42) {
+        ctx.font = `500 ${sw(10)}px 'Satoshi', sans-serif`; ctx.textAlign = 'right'; ctx.textBaseline = 'middle'; ctx.fillStyle = rgba(c.color, 0.5 * clamp01((k - 0.42) / 0.3));
+        ctx.fillText('p', x - hw - sw(6), (pTop + pBot) / 2); ctx.fillText('q', x - hw - sw(6), (qTop + qBot) / 2);
+      }
+      // title above the bar and a count below it, at screen size like the lobe titles; the hovered chromosome keeps its title while labels are off
+      const hovered = mouseW && Math.abs(mouseW[0] - x) < hw + 20 && mouseW[1] > c.top - 30 && mouseW[1] < c.bot + 30;
+      const [sx, sy] = toScreen(x, c.top), [, sb] = toScreen(x, c.bot);
+      const pitch = (G.barW + G.gapX + c.reachL + c.reachR) * k - 8;
+      // chromosome names are the map's axis, so they only dim when labels are off, and fade out once the columns are too tight to hold them
+      const v = titleVis * Math.max(tl, hovered ? 1 : 0.55) * (hovered ? 1 : clamp01((pitch - 18) / 26)); if (v < 0.02) return;
+      const fs = Math.max(9.5, Math.min(mobile ? 11 : 14, 10 + Math.sqrt(c.loci.length) * 1.2)), fs2 = Math.max(9, fs - 3);
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0); ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic';
+      ctx.font = `600 ${fs}px 'Clash Display', 'Satoshi', sans-serif`; ctx.fillStyle = rgba(c.color, 0.9 * v);
+      const lines = wrapTitle(c.name, Math.max(40, pitch)); lines.forEach((ln, i) => ctx.fillText(ln, sx, sy - 10 - (lines.length - 1 - i) * (fs + 2)));
+      const subs = d3.sum(c.loci, p => p.children.filter(pageOn).length), syn = d3.sum(c.loci, p => p.nSyn) + (c.hubOn ? c.hubOn.nSyn : 0);
+      ctx.font = `500 ${fs2}px 'Satoshi', sans-serif`; ctx.textBaseline = 'top'; ctx.fillStyle = rgba('#a7b2cc', 0.8 * v);
+      ctx.fillText(`${c.loci.length + (c.hubOn ? 1 : 0)}${subs ? `+${subs}` : ''} · ${syn}`, sx, sb + 8);
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0); ctx.translate(tx, ty); ctx.scale(k, k);
+    });
+    ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic';
+  }
 
   // ---------- draw ----------
   function draw(now) {
@@ -336,8 +505,10 @@
     const [vx0, vy0] = toWorld(-80, -80), [vx1, vy1] = toWorld(W + 80, H + 80);
     const inView = (x, y) => x > vx0 && x < vx1 && y > vy0 && y < vy1;
 
+    // genome layout: the karyogram (bars, bands, centromeres, titles) stands in for the lobe halos
+    if (genome()) drawKaryogram(clamp01((1.7 - k) / 0.6), labelF);
     // lobe halos
-    if (lobeVis > 0) {
+    if (lobeVis > 0 && !genome()) {
       ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic';
       // lobe circles first, so a title can avoid both other titles and other lobes' neurons
       const circles = lobes.filter(l => lobeOn[l.id] && !selfLobe(l)).map(l => {
@@ -422,12 +593,14 @@
       const da = Math.min(depthA(l.source), depthA(l.target)); if (da < 0.03) return;
       if (!inView(l.source.x, l.source.y) && !inView(l.target.x, l.target.y)) return;
       const inFocus = focusSet && focusSet.has(l.source) && focusSet.has(l.target) && (l.source === focus || l.target === focus);
-      const base = 0.16 + Math.min(l.w, 6) * 0.045;
+      const base = (0.16 + Math.min(l.w, 6) * 0.045) * (genome() && !sameChromo(l.source, l.target) ? 0.45 : 1);   // genome layout: arches between chromosomes stay faint so the bands read
       const a = (focusSet ? (inFocus ? 0.85 : 0.05) : base) * da;
       const col = l.source.lobe === l.target.lobe ? lobeColor(l.source) : '#b9c4e0';
       ctx.strokeStyle = rgba(col, a);
       ctx.lineWidth = sw(inFocus ? 1.8 : 0.7 + Math.min(l.w, 6) * 0.18);
-      ctx.beginPath(); ctx.moveTo(l.source.x, l.source.y); ctx.lineTo(l.target.x, l.target.y); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(l.source.x, l.source.y);
+      const c = ctrlOf(l); if (c) ctx.quadraticCurveTo(c[0], c[1], l.target.x, l.target.y); else ctx.lineTo(l.target.x, l.target.y);
+      ctx.stroke();
     });
 
     // synapse tethers + cross links + source tethers
@@ -456,7 +629,7 @@
       for (let i = pulses.length - 1; i >= 0; i--) {
         const p = pulses[i]; p.t += p.speed; if (p.t >= 1) { pulses.splice(i, 1); continue; }
         const s = p.dir > 0 ? p.l.source : p.l.target, e = p.dir > 0 ? p.l.target : p.l.source;
-        const x = s.x + (e.x - s.x) * p.t, y = s.y + (e.y - s.y) * p.t;
+        const [x, y] = linkPoint(p.l, s, e, p.t);
         const col = s.lobe === e.lobe ? lobeColor(s) : '#ffffff';
         const a = Math.sin(p.t * Math.PI) * Math.min(depthA(s), depthA(e));
         if (a < 0.02) continue;
@@ -496,12 +669,13 @@
         ctx.beginPath(); ctx.arc(n.x, n.y, r * (isPulse ? 1.9 : 1), 0, Math.PI * 2); ctx.fill();
         if (related && n.links.length) { ctx.strokeStyle = rgba('#ffffff', 0.7 * v); ctx.lineWidth = sw(0.8); ctx.beginPath(); ctx.arc(n.x, n.y, r + sw(1.6), 0, Math.PI * 2); ctx.stroke(); }
         if (isPulse) { ctx.strokeStyle = rgba('#ffffff', 0.9); ctx.lineWidth = sw(1.5); ctx.beginPath(); ctx.arc(n.x, n.y, r + sw(5), 0, Math.PI * 2); ctx.stroke(); }
-        const lv = (focusSet && related ? Math.max(synLabelVisFocus, synLabelVisAll) : synLabelVisAll) * labelOf(n);
+        // genome layout: the ladder is one row, so labels hang from it at an angle and only for the focused neuron, where the rest of the map is dimmed
+        const lv = (genome() ? (focusSet && related ? synLabelVisFocus : 0) : focusSet && related ? Math.max(synLabelVisFocus, synLabelVisAll) : synLabelVisAll) * labelOf(n);
         if (lv > 0.02 && related) {
           const p = pageById[n.page];
-          let ang = Math.atan2(n.y - p.y, n.x - p.x);
-          const flip = Math.cos(ang) < 0;
-          ctx.save(); ctx.translate(n.x, n.y); ctx.rotate(flip ? ang + Math.PI : ang);
+          let ang = Math.atan2(n.y - p.y, n.x - p.x), flip = Math.cos(ang) < 0;
+          if (genome()) { flip = isChild(p); ang = flip ? -1.0 : 1.0; }   // down-right for a neuron's ladder, down-left for a sub-neuron's
+          ctx.save(); ctx.translate(n.x, n.y); ctx.rotate(flip && !genome() ? ang + Math.PI : ang);
           ctx.font = `500 ${sw(10.5)}px 'Satoshi', sans-serif`; ctx.textBaseline = 'middle'; ctx.textAlign = flip ? 'right' : 'left';
           ctx.fillStyle = rgba('#e9eefb', 0.92 * lv * v * explodeF);
           const label = n.lead.length > 36 ? n.lead.slice(0, 34) + '…' : n.lead;
@@ -549,10 +723,14 @@
       const lv = (isChild(n) ? childLabelVis : isSelf(n) ? 1 : important ? Math.max(labelVis, clamp01((k - 0.45) / 0.25)) : labelVis) * labelOf(n);
       if (lv > 0.02 && (related || lv > 0.6)) {
         const fs = isSelf(n) ? 15 : isChild(n) ? 10.5 : 12;
-        ctx.font = `${isSelf(n) ? 600 : 500} ${sw(fs)}px 'Satoshi', sans-serif`; ctx.textAlign = 'center'; ctx.textBaseline = 'top';
-        ctx.fillStyle = rgba('#000000', 0.55 * lv * a); ctx.fillText(n.title, n.x + sw(0.8), n.y + r + sw(5.8));
+        ctx.font = `${isSelf(n) ? 600 : 500} ${sw(fs)}px 'Satoshi', sans-serif`;
+        // genome layout: labels sit beside the band like gene annotations (right of a neuron, left of a sub-neuron) and lift above the synapse ladder
+        const beside = genome() && !(isSelf(n) && !brainsIn), side = beside ? (isChild(n) ? -1 : 1) : 0;
+        const lx = beside ? n.x + side * (r + sw(6)) : n.x, ly = beside ? n.y - explodeF * (n.nSyn ? r * 0.6 + sw(8) : 0) : n.y + r + sw(5);
+        ctx.textAlign = beside ? (side > 0 ? 'left' : 'right') : 'center'; ctx.textBaseline = beside ? 'middle' : 'top';
+        ctx.fillStyle = rgba('#000000', 0.55 * lv * a); ctx.fillText(n.title, lx + sw(0.8), ly + sw(0.8));
         ctx.fillStyle = rgba(related ? '#f1f4ff' : '#9aa5c2', (related ? 0.95 : 0.5) * lv);
-        ctx.fillText(n.title, n.x, n.y + r + sw(5));
+        ctx.fillText(n.title, lx, ly);
       }
     });
 
@@ -691,12 +869,13 @@
     else if (e.key === 'h' || e.key === 'H') setMode('pan');
     else if (e.key === 'r' || e.key === 'R') releaseAll();
     else if (e.key === 'l' || e.key === 'L') setLabels(!labelsOn);
+    else if (e.key === 'g' || e.key === 'G') setLayout(genome() ? 'neural' : 'genome');
   });
 
   function select(n, opts = {}) {
     if (selected && selected.kind === 'page' && !selected.pinned) { selected.fx = null; selected.fy = null; }
     selected = n; pulseSyn = null;
-    if (n.kind === 'page' && !isChild(n)) { n.fx = n.x; n.fy = n.y; }   // sub-neurons stay free so they can reach their ring slot
+    if (n.kind === 'page' && !isChild(n) && !genome()) { n.fx = n.x; n.fy = n.y; }   // sub-neurons stay free so they can reach their ring slot; in the genome layout the locus holds it
     if (n.kind === 'page') {
       const kk = isChild(n) ? 3.6 : n.nSyn > 14 ? 2.6 : 3.2;
       if (!opts.noZoom) {
@@ -715,7 +894,7 @@
     }
     else if (!opts.noZoom) zoomTo(n, Math.max(k, 3));
     renderPanel(n); panel.hidden = false;
-    if (n.kind === 'page' && history.replaceState) history.replaceState(null, '', '#n=' + encodeURIComponent(n.id));
+    if (n.kind === 'page' && history.replaceState) history.replaceState(null, '', '#n=' + encodeURIComponent(n.id) + (genome() ? '&layout=genome' : ''));
   }
   function clearSelection() { if (selected && selected.kind === 'page' && !selected.pinned) { selected.fx = null; selected.fy = null; } selected = null; pulseSyn = null; panel.hidden = true; }
 
@@ -810,19 +989,42 @@
     <button class="tool-mode" data-mode="pan" title="Pan (H): drag to pan the view" aria-label="Pan tool">✋</button>
     <button id="release-pins" title="Release hand-placed neurons (R)" aria-label="Release hand-placed neurons">⟲</button>
     <button id="labels-toggle" title="Labels on/off (L): when off, only the neuron or lobe under the cursor keeps its label" aria-label="Toggle labels" aria-pressed="true"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 12V5a2 2 0 0 1 2-2h7l9 9-9 9-9-9z"/><circle cx="7.5" cy="7.5" r="1.2" fill="currentColor" stroke="none"/></svg></button>
+    <button id="layout-toggle" title="Genome layout (G): arrange the brain like a karyogram — lobes or brains as chromosomes, neurons as bands, the hub at the centromere" aria-label="Toggle genome layout" aria-pressed="false"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 3.5c-1.6 0-2.5 1-2.5 2.5v3.6c0 1 .7 1.6 1.4 2.1-.7.5-1.4 1.1-1.4 2.1V18c0 1.5.9 2.5 2.5 2.5s2.5-1 2.5-2.5v-4.2c0-1-.7-1.6-1.4-2.1.7-.5 1.4-1.1 1.4-2.1V6c0-1.5-.9-2.5-2.5-2.5z"/><path d="M17 3.5c-1.6 0-2.5 1-2.5 2.5v5.2c0 1 .7 1.6 1.4 2.1-.7.5-1.4 1.1-1.4 2.1V18c0 1.5.9 2.5 2.5 2.5s2.5-1 2.5-2.5v-2.6c0-1-.7-1.6-1.4-2.1.7-.5 1.4-1.1 1.4-2.1V6c0-1.5-.9-2.5-2.5-2.5z"/><path d="M4.5 7.5h5M4.5 16h5M14.5 8.5h5M14.5 17h5"/></svg></button>
     <button id="shot" title="Screenshot (S): save the current view as a PNG" aria-label="Save a screenshot"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 8h3l2-3h6l2 3h3a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V9a1 1 0 0 1 1-1z"/><circle cx="12" cy="13.5" r="3.5"/></svg></button>`;
   document.getElementById('zoom-ctl').before(tools);
   tools.querySelectorAll('.tool-mode').forEach(b => b.addEventListener('click', () => setMode(b.dataset.mode)));
   document.getElementById('release-pins').addEventListener('click', releaseAll);
   // labels toggle: a tool button and a switch in the lobes panel drive the same state
   const switches = document.querySelector('#lobes .switches');
-  if (switches) { const l = document.createElement('label'); l.className = 'switch'; l.innerHTML = '<input type="checkbox" id="labels" checked><span>Labels</span>'; switches.prepend(l); }
+  if (switches) {
+    const g = document.createElement('label'); g.className = 'switch'; g.innerHTML = '<input type="checkbox" id="layout-genome"><span>Genome layout</span>'; switches.prepend(g);
+    const l = document.createElement('label'); l.className = 'switch'; l.innerHTML = '<input type="checkbox" id="labels" checked><span>Labels</span>'; switches.prepend(l);
+  }
+  // layout switch: a tool button, a switch in the lobes panel and the G key drive the same state; the hash carries it so a link can open the karyogram
+  function setLayout(l, opts = {}) {
+    if (l !== 'genome' && l !== 'neural') return;
+    const changed = l !== layout; layout = l;
+    const b = document.getElementById('layout-toggle'); b.classList.toggle('on', genome()); b.setAttribute('aria-pressed', String(genome()));
+    const c = document.getElementById('layout-genome'); if (c) c.checked = genome();
+    if (!changed) return;
+    // hand-placed pins would fight the loci, so both directions start from free neurons; the selected neuron keeps its pin in the neural layout
+    pages.forEach(n => { n.pinned = false; n.fx = null; n.fy = null; });
+    if (genome()) layoutGenome(false); else if (selected && selected.kind === 'page' && !isChild(selected)) { selected.fx = selected.x; selected.fy = selected.y; }
+    refreshForces(); rebuild(false); sim.alpha(0.9).restart();
+    if (history.replaceState) { const h = location.hash.replace(/[#&]layout=genome\b/, '').replace(/^&/, '#'); history.replaceState(null, '', (genome() ? (h.length > 1 ? h + '&' : '#') + 'layout=genome' : h) || location.pathname + location.search); }
+    if (!opts.silent) { flash(genome() ? 'genome layout · chromosomes are lobes, bands are neurons, the hub sits at the centromere' : 'neural layout'); if (!opts.noFit) setTimeout(() => { clearSelection(); fitAll(1100); }, 350); }
+    updateHint();
+  }
+  document.getElementById('layout-toggle').addEventListener('click', () => setLayout(genome() ? 'neural' : 'genome'));
+  document.getElementById('layout-genome')?.addEventListener('change', e => setLayout(e.target.checked ? 'genome' : 'neural'));
+  if (genome()) setLayout('genome', { silent: true });   // initial state from MINDBLOWN_OPTIONS or the hash, without the toast
   function setLabels(on) {
     labelsOn = on;
     const b = document.getElementById('labels-toggle'); b.classList.toggle('off', !on); b.setAttribute('aria-pressed', String(on));
     const c = document.getElementById('labels'); if (c) c.checked = on;
     flash(on ? 'labels on' : 'labels off · hover a neuron or lobe to read it');
   }
+  if (!labelsOn) { const b = document.getElementById('labels-toggle'); b.classList.add('off'); b.setAttribute('aria-pressed', 'false'); const c = document.getElementById('labels'); if (c) c.checked = false; }   // initial state from MINDBLOWN_OPTIONS, without the toast
   document.getElementById('labels-toggle').addEventListener('click', () => setLabels(!labelsOn));
   document.getElementById('labels')?.addEventListener('change', e => setLabels(e.target.checked));
   // screenshot: the canvas on the page background, with a small caption; saved as PNG
@@ -864,7 +1066,7 @@
     const pinned = pages.filter(n => n.pinned).length;
     if (multi.size > 1) { hint.textContent = `${multi.size} neurons selected · drag one to move them all · Shift+click adds · Esc clears${pinned ? ' · R releases pins' : ''}`; return; }
     if (pinned && lvl === 'Lobes') { hint.textContent = `${plural(pinned, 'neuron')} placed by hand · R releases them`; return; }
-    if (lvl === 'Lobes') { hint.textContent = mode === 'select' ? 'scroll to zoom · drag to select · mouse3 or Space to pan · drag a neuron to move it' : 'scroll to zoom · drag to pan · click a neuron · V for select mode'; return; }
+    if (lvl === 'Lobes') { hint.textContent = genome() ? 'genome layout · each bar is a lobe, each band a neuron · G returns to the neural layout' : mode === 'select' ? 'scroll to zoom · drag to select · mouse3 or Space to pan · drag a neuron to move it · G for genome layout' : 'scroll to zoom · drag to pan · click a neuron · V for select mode · G for genome layout'; return; }
     hint.textContent = lvl === 'Lobes' ? 'scroll to zoom · drag to pan · click a neuron' : lvl === 'Neurons' ? (hasSubs ? 'keep zooming: sub-neurons unfold at 0.85×, synapses at 1.5×' : 'keep zooming: synapses explode at 1.5×') : lvl === 'Sub-neurons' ? 'small satellites are sub-neurons · zoom past 1.5× to explode synapses' : 'dots are synapses · diamonds are sources · dashed lines fire across neurons';
   }
   function updateStats() {
@@ -921,5 +1123,5 @@
   setTimeout(openHash, 1700);
   window.addEventListener('hashchange', openHash);
   // read-only hooks for the QA scripts in tools/ (screen position of a neuron, current marquee selection)
-  window.MINDBLOWN_QA = { screenOf: id => { const n = pageById[id]; return n ? toScreen(n.x, n.y) : null; }, selection: () => [...multi].map(n => n.id), pinned: () => pages.filter(n => n.pinned).map(n => n.id), mode: () => mode, labels: () => labelsOn, screenshot };
+  window.MINDBLOWN_QA = { screenOf: id => { const n = pageById[id]; return n ? toScreen(n.x, n.y) : null; }, selection: () => [...multi].map(n => n.id), pinned: () => pages.filter(n => n.pinned).map(n => n.id), mode: () => mode, labels: () => labelsOn, layout: () => layout, setLayout: l => setLayout(l, { noFit: true }), chromosomes: () => chromos.filter(c => c.on).map(c => ({ id: c.id, x: c.x, top: c.top, bot: c.bot, loci: c.loci.map(p => p.id), hub: c.hubOn ? c.hubOn.id : null })), screenshot };
 })();
