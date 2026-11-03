@@ -4,6 +4,8 @@ MindBlown turns a Perplexity Brain (the `memory/knowledge` wiki) into a zoomable
 
 Navigation is centralized in `brain-nav.js`: Home, the four local modules, and verified public networks (Brain 42, Deep Answers, Human Genome, GTA Network and AI Hub). It populates every module dropdown, the homepage Projects menu and the public-network footer. Add future public destinations there, not separately to each shell. Private previews and unpublished brains are deliberately excluded.
 
+The generic **Owner menu** shortcut opens a separate private Computer app in a new tab. Only that launcher's URL is in this repository; its catalog, private Brain URLs and datasets must never be bundled here. Its access is controlled by Computer, not a client-side visibility toggle. Do not publish the private launcher or widen its Share settings.
+
 - **Lobes** — colour-coded clusters of related pages (zoomed out).
 - **Neurons** — one node per wiki page, sized by how many notes it holds.
 - **Synapses** — every `- **Lead** — text` bullet becomes its own particle orbiting its neuron; zoom in (or flip "Explode every neuron") to read them, follow `[[wikilinks]]` between pages, and trace `[cite:n]` sources back to sessions, GitHub PRs and web pages.
