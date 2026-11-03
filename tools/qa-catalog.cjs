@@ -3,7 +3,8 @@ const { chromium } = require('playwright');
 const assert = require('node:assert/strict');
 const base = process.argv[2] || 'http://127.0.0.1:8124/';
 const labels = ['Home', 'Projects', 'Life', 'Programming', 'Build',
-  'Brain 42', 'Deep Answers', 'Human Genome', 'GTA Network', 'AI Hub', 'Owner menu'];
+  'Brain 42', 'The Guide', 'Elements', 'Atomic', 'Molecular', 'Cellular', 'Human Genome', 'Biosphere', 'SETI',
+  'Deep Answers', 'GTA Network', 'AI Hub', 'Universim', 'Modifiers Lab', 'Owner menu'];
 (async () => {
   const browser = await chromium.launch({ channel: 'chromium', headless: true });
   try {
@@ -28,7 +29,7 @@ const labels = ['Home', 'Projects', 'Life', 'Programming', 'Build',
           const r = el.getBoundingClientRect();
           return r.left >= 0 && r.right <= innerWidth && r.bottom <= innerHeight;
         }), true);
-        if (home) assert.equal(await page.locator('[data-public-networks] a').count(), 5);
+        if (home) assert.equal(await page.locator('[data-public-networks] a').count(), 14);
         await page.keyboard.press('Escape');
         await page.locator(menu).waitFor({ state: 'hidden', timeout: 3000 });
         assert.equal(await page.locator(menu).isVisible(), false, `${name} ${viewport.width}: Escape should dismiss menu`);

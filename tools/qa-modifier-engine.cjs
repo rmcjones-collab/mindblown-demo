@@ -1,0 +1,16 @@
+const assert=require('node:assert/strict');
+const {evaluate}=require('../modifier-engine.js');
+const ids=['a','b','c','d'];
+const s={modifiers:[{target:'a',gain:1.5}],edges:[{from:'a',to:'b',weight:.5},{from:'b',to:'c',weight:.5}]};
+const before=JSON.stringify(s),v=evaluate(s,ids);
+assert.equal(v.a.value,1.5);assert.equal(v.b.value,1.25);assert.equal(v.c.value,1.125);
+assert.equal(v.d,undefined);assert.equal(JSON.stringify(s),before);
+assert.throws(()=>evaluate({...s,edges:[...s.edges,{from:'c',to:'a',weight:1}]},ids),/Cycles/);
+assert.throws(()=>evaluate({...s,edges:[s.edges[0],s.edges[0]]},ids),/already exists/);
+assert.throws(()=>evaluate({...s,edges:[{from:'a',to:'z',weight:1}]},ids),/Invalid/);
+assert.throws(()=>evaluate({...s,modifiers:[{target:'a',gain:NaN}]},ids),/Invalid/);
+assert.equal(evaluate({modifiers:[{target:'a',gain:2},{target:'a',gain:2}],edges:[]},ids).a.value,2);
+assert.equal(evaluate({modifiers:[{target:'a',gain:2},{target:'a',gain:0}],edges:[]},ids).a.value,1);
+assert.equal(evaluate({modifiers:[{target:'a',gain:2}],edges:[{from:'a',to:'b',weight:-1}]},ids).b.value,0);
+assert.deepEqual(evaluate({modifiers:[],edges:[]},ids),{});
+console.log('PASS: chain, unmodeled, immutability, cycle, duplicate, invalid, clamp, cancellation, negative influence, reset.');

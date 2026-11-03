@@ -19,6 +19,8 @@ Homepages and directories without a Brain canvas do not need fake Lobes controls
 
 ## Current disposition
 
-**BLOCKED.** The current demo does not integrate modifier placement and does not include Genome Layout in the Lobes panel. A standalone modifiers prototype and an unmerged genome-layout implementation are not equivalent to release integration.
+**PUBLICATION ON HOLD.** Modifier placement and Genome Layout are now integrated in the demo's shared renderer, including Build's Explode view. Local placement, propagation, reset, layout-switching and long-list scrolling checks pass. Hosted-preview verification and explicit owner approval remain required for any public release.
+
+The shared navigation rollout does not certify sibling renderers. In particular, navigation-only updates to Neural-engine and standalone apps must not be published as if they had passed the modifier/Genome gate.
 
 No merge, review, deployment, privacy change or publication is authorized by this document.

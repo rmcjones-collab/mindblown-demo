@@ -809,7 +809,7 @@
     const base = new URL('./', location.href).href;
     const html = await fetch('./projects.html').then(r => r.text()).catch(() => null);
     if (!html) { toast('Could not load the explorer.'); return; }
-    const doc = html.replace(/<script src="\.\/data\.js"><\/script>/, `<script>window.MINDBLOWN=${JSON.stringify(toDataset()).replace(/</g, '\\u003c')};</script>`)
+    const doc = html.replace(/<script src="\.\/data\.js"><\/script>/, `<script>window.MINDBLOWN_EMBEDDED=true;window.MINDBLOWN=${JSON.stringify(toDataset()).replace(/</g, '\\u003c')};</script>`)
       .replace('<head>', `<head><base href="${base}">`).replace(/<\/a>\s*<nav class="brains"[\s\S]*?<\/nav>/, '</span>')
       .replace(/<a class="home"[^>]*>/, '<span style="display:flex;align-items:center;gap:12px">'); // the shell's home link and brain switcher would navigate inside the iframe
     $('explorer-frame').srcdoc = doc; $('explorer').hidden = false;

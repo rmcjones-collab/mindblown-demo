@@ -1,0 +1,52 @@
+const {default:assert}=await import('node:assert/strict');
+async function run(page,base){
+ const errors=[];const error=e=>errors.push(e.message);page.on('pageerror',error);
+ for(const route of ['projects','life','programming']){
+  await page.goto(new URL(route+'.html',base).href);
+  await page.locator('#modifiers-open').waitFor();
+  const baseline=await page.evaluate(()=>JSON.stringify(window.MINDBLOWN));
+  await page.locator('#layout-genome').click();
+  assert.equal(await page.locator('#layout-genome').getAttribute('aria-pressed'),'true');
+  await page.locator('#modifiers-open').click();
+  const options=await page.locator('#modifier-target option').evaluateAll(es=>es.slice(0,3).map(e=>e.value));
+  await page.locator('#modifier-place').click();
+  await page.mouse.click(700,400);
+  assert.equal(await page.locator('.modifier-card').count(),1);
+  const range=page.getByRole('slider',{name:'M1 scenario signal'});
+  await range.focus();await range.press('End');
+  assert.match(await page.locator('#modifier-results').innerText(),/2\.00/);
+  await page.locator('#modifier-dependencies summary').click();
+  await page.locator('#modifier-from').selectOption(options[0]);
+  await page.locator('#modifier-to').selectOption(options[1]);
+  await page.locator('#modifier-add-edge').click();
+  await page.locator('#modifier-from').selectOption(options[1]);
+  await page.locator('#modifier-to').selectOption(options[2]);
+  await page.locator('#modifier-add-edge').click();
+  const results=await page.evaluate(()=>MINDBLOWN_MODIFIERS.results());
+  assert.equal(results[options[0]].value,2);assert.equal(results[options[1]].value,1.5);assert.equal(results[options[2]].value,1.25);
+  await page.locator('#modifier-from').selectOption(options[2]);
+  await page.locator('#modifier-to').selectOption(options[0]);
+  await page.locator('#modifier-add-edge').click();
+  assert.match(await page.locator('#modifier-status').innerText(),/Cycles/);
+  await page.locator('#modifier-close').click();
+  await page.locator('#layout-genome').click();
+  assert.equal(await page.locator('#layout-genome').getAttribute('aria-pressed'),'false');
+  assert.deepEqual(await page.evaluate(()=>MINDBLOWN_MODIFIERS.results()),results);
+  await page.locator('#modifiers-open').click();
+  await page.locator('#modifier-beside').click();
+  assert.equal(await page.locator('.modifier-card').count(),2);
+  await page.locator('.modifier-card').last().getByRole('button',{name:'Remove',exact:true}).click();
+  assert.equal(await page.locator('.modifier-card').count(),1);
+  await page.locator('#modifier-undo').click();assert.equal(await page.locator('.modifier-card').count(),2);
+  await page.locator('#modifier-redo').click();assert.equal(await page.locator('.modifier-card').count(),1);
+  await page.locator('#modifier-reset').click();
+  assert.equal(await page.locator('.modifier-card').count(),0);
+  await page.locator('#modifier-undo').click();assert.equal(await page.locator('.modifier-card').count(),1);
+  assert.equal(await page.evaluate(()=>JSON.stringify(window.MINDBLOWN)),baseline);
+  await page.reload();await page.locator('#modifiers-open').click();
+  assert.equal(await page.locator('.modifier-card').count(),0);
+ }
+ assert.deepEqual(errors,[]);page.off('pageerror',error);
+ return 'PASS: all three brains: canvas/beside placement, propagation, cycle rejection, layout preservation, remove/undo/redo/reset, immutable facts, reload reset.';
+}
+export {run};
