@@ -148,6 +148,7 @@
   // from lobes[].brain / self and D.brains alone, so any brain lays out the same way.
   const G = { barW: 44, gapX: 170, rowGap: 300, hubGap: 420 };
   const chromos = [];
+  let layoutAspect = 0;   // viewport aspect the current genome layout was computed for
   const chromoOf = {};   // lobe id → chromosome
   if (brainsIn) {
     brainsIn.forEach(b => {
@@ -186,7 +187,8 @@
     // map closest to a landscape screen wins, so a brain with a handful of lobes stays on one row and a 26-brain network takes two or three
     const on = chromos.filter(c => c.on), n = on.length;
     const oneRowW = d3.sum(on, c => c.reachL + G.barW + c.reachR + G.gapX), tallest = Math.max(0, ...on.map(c => c.above + c.below)), hubExtra = brainsIn ? 0 : G.hubGap;
-    const target = Math.max(0.7, Math.min(2.2, (W || 1600) / (H || 900)));   // aim the map at the screen's shape, so a phone gets a taller karyogram
+    layoutAspect = (W || 1600) / (H || 900);
+    const target = Math.max(0.7, Math.min(2.2, layoutAspect));   // aim the map at the screen's shape, so a phone gets a taller karyogram
     const aspectOff = r => Math.abs(Math.log((oneRowW / r) / (hubExtra + tallest * r + G.rowGap * (r - 1)) / target));
     let rows = 1; for (let r = 2; r <= Math.min(4, n); r++) if (aspectOff(r) < aspectOff(rows)) rows = r;
     const per = Math.ceil(n / rows);
@@ -333,7 +335,7 @@
   // ---------- canvas ----------
   function resize() {
     const previousWidth=W, previousHeight=H;
-    const first = W === 0, aspectBefore = W / Math.max(1, H);
+    const first = W === 0;
     dpr = Math.min(window.devicePixelRatio || 1, 2);
     W = canvas.clientWidth; H = canvas.clientHeight;
     canvas.width = W * dpr; canvas.height = H * dpr;
@@ -341,8 +343,8 @@
       const ratio=Math.min(W,H)/Math.min(previousWidth,previousHeight);
       d3.select(canvas).interrupt().call(zoom.transform,d3.zoomIdentity.translate(W/2+(tx-previousWidth/2)*ratio,H/2+(ty-previousHeight/2)*ratio).scale(k*ratio));
     }
-    // the karyogram picks its row count from the viewport aspect, so a rotation (landscape ↔ portrait) re-lays it out and refits
-    if (!first && genome() && Math.abs(W / Math.max(1, H) - aspectBefore) > 0.25) { layoutGenome(false); refreshForces(); rebuild(false); sim.alpha(0.6).restart(); setTimeout(() => fitAll(500), 350); }   // fit once the pages have moved toward the new loci, as the G toggle does
+    // the karyogram picks its row count from the viewport aspect, so once the shape drifts far from the one it was laid out for (a rotation, or a long window drag) it re-lays out and refits
+    if (!first && genome() && Math.abs(W / Math.max(1, H) - layoutAspect) > 0.25) { pages.forEach(n => { if (n.pinned) { n.pinned = false; n.fx = null; n.fy = null; } }); layoutGenome(false); refreshForces(); rebuild(false); sim.alpha(0.6).restart(); setTimeout(() => fitAll(500), 350); }   // fit once the pages have moved toward the new loci, as the G toggle does
   }
   window.addEventListener('resize', resize);
   resize();
@@ -377,6 +379,7 @@
   }
   function fitAll(dur = 900) {
     const { kk, tx, ty } = fitTransform();
+    if (!(kk > 0)) return;   // a very short canvas can make the fitted scale non-positive, which would mirror the map
     d3.select(canvas).transition().duration(dur).ease(d3.easeCubicInOut).call(zoom.transform, d3.zoomIdentity.translate(tx, ty).scale(kk));
   }
   function zoomTo(n, kk, dur = 1100) {
