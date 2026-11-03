@@ -5,6 +5,7 @@
   const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
   const origin = location.origin + location.pathname.replace(/\/api\/.*$/, '');   // host root as served (works for subpath previews too)
   const mb = MindBlownAPI.host(origin, { transport: 'json' });
+  const rel = u => typeof u === 'string' && u.startsWith(origin) ? u.slice(origin.length) : (() => { try { return new URL(u).pathname; } catch { return u; } })();
   const fmtKB = n => n == null ? '' : n < 1024 ? n + ' B' : n < 1048576 ? (n / 1024).toFixed(1) + ' KB' : (n / 1048576).toFixed(2) + ' MB';
   const EP = [
     ['brain.json', 'Manifest: title, counts, lobes, endpoints, content hash, network membership, optional write route.', 'brain'],
@@ -34,7 +35,7 @@
     const cut = text.length > 60000 ? text.slice(0, 60000) + '\n… (' + fmtKB(text.length) + ' total; open raw for everything)' : text;
     $('#r-body').innerHTML = highlight(cut);
     $('#r-body').dataset.full = text;
-    $('#r-url').textContent = url;
+    $('#r-url').textContent = rel(url);
   }
   const copyBtn = (btn, text) => navigator.clipboard.writeText(text).then(() => { btn.classList.add('done'); btn.textContent = 'copied'; setTimeout(() => { btn.classList.remove('done'); btn.textContent = 'copy'; }, 1400); }).catch(() => {});
 
@@ -50,10 +51,10 @@
     $('#brain-grid').innerHTML = brains.map(b => `<article class="card" style="--c:${esc(b.color || '#ff8a3d')}">
       <h3>${esc(b.title)}${b.fictional ? '<span class="fic">fictional</span>' : ''}</h3>
       <div class="counts"><b>${b.counts.pages}</b> neurons · <b>${b.counts.synapses}</b> synapses · <b>${b.counts.sources}</b> sources · <b>${b.counts.links}</b> links</div>
-      <div class="paths"><a href="${esc(b.api)}brain.json">${esc(new URL(b.api).pathname)}brain.json</a><a href="${esc(b.api)}pages.json">${esc(new URL(b.api).pathname)}pages.json</a><a href="${esc(b.api)}feed.json">${esc(new URL(b.api).pathname)}feed.json</a></div>
+      <div class="paths"><a href="${esc(b.api)}brain.json">${esc(rel(b.api))}brain.json</a><a href="${esc(b.api)}pages.json">${esc(rel(b.api))}pages.json</a><a href="${esc(b.api)}feed.json">${esc(rel(b.api))}feed.json</a></div>
       <a class="open" href="${esc(b.viewer)}">open the brain ↗</a></article>`).join('')
       + (disc.network ? `<article class="card" style="--c:#a7b2cc"><h3>Network</h3><div class="counts"><b>${disc.network.brains}</b> brains · <b>${disc.network.shared}</b> shared neuron ids${disc.peers && disc.peers.length ? ' · <b>' + disc.peers.length + '</b> peer hosts' : ''}</div>
-        <div class="paths"><a href="${esc(disc.network.api)}network.json">${esc(new URL(disc.network.api).pathname)}network.json</a><a href="${esc(disc.network.api)}shared.json">${esc(new URL(disc.network.api).pathname)}shared.json</a></div></article>` : '');
+        <div class="paths"><a href="${esc(disc.network.api)}network.json">${esc(rel(disc.network.api))}network.json</a><a href="${esc(disc.network.api)}shared.json">${esc(rel(disc.network.api))}shared.json</a><a href="${esc(disc.network.api)}network.json">peers: ${esc((disc.peers || []).map(p => p.replace(/^https?:\/\//, '')).join(', ') || 'none')}</a></div><a class="open" href="${esc(disc.network.api)}network.json">open the network manifest ↗</a></article>` : '');
     $('#foot-gen').textContent = `${disc.protocol} · generated ${disc.generated} by ${disc.generator || 'build_api.py'} · host ${disc.host}`;
     $('#disc-link').href = origin + '/.well-known/mindblown.json';
     // try-it controls
@@ -71,7 +72,7 @@
   }
   function renderTable() {
     const b = brains.find(x => x.id === $('#t-brain').value) || brains[0];
-    const p = new URL(b.api).pathname;
+    const p = rel(b.api);
     fetch(b.api + 'brain.json').then(r => r.json()).then(m => {
       $('#ep-table').innerHTML = EP.map(([f, d, key]) => `<tr><td><a href="${esc(b.api + (f.includes('{') ? 'pages.json' : f))}"><code>${esc(p + f)}</code></a></td><td>${esc(d)}</td><td>${f.includes('{') ? 'per page' : fmtKB(m.sizes && m.sizes[key])}</td></tr>`).join('');
       $('#openapi-link').href = b.api + 'openapi.json';
@@ -111,20 +112,20 @@
         const b = await mb.brain($('#t-brain').value);
         const q = $('#t-query').value.trim() || 'brain';
         const hits = await b.search(q, { limit: 12 });
-        $('#r-url').textContent = `search("${q}") over ${url}`;
+        $('#r-url').textContent = `search("${q}") over ${rel(url)}`;
         $('#r-body').innerHTML = hits.length ? '<ul class="hits">' + hits.map(h => `<li><span class="sc">${h.score.toFixed(1)}</span><span><a class="t" href="${esc(h.page.url)}">${esc(h.page.title)}</a><span class="d">${esc(h.page.id)} · ${h.page.synapses} synapses · matched ${esc(h.terms.join(', '))}</span></span></li>`).join('') + '</ul>' : 'no matches';
         $('#r-body').dataset.full = JSON.stringify(hits, null, 2);
       } else {
         const r = await fetch(url, { headers: { accept: 'application/json' } });
         if (!r.ok) throw new Error('HTTP ' + r.status);
         const text = await r.text();
-        showJSON(JSON.parse(text), url);
+        showJSON(JSON.parse(text), rel(url));
         $('#t-meta').textContent = `${fmtKB(text.length)} · ${Math.round(performance.now() - t0)} ms`;
         return;
       }
       $('#t-meta').textContent = `${Math.round(performance.now() - t0)} ms`;
     } catch (e) {
-      $('#r-url').textContent = url;
+      $('#r-url').textContent = rel(url);
       $('#r-body').innerHTML = `<span class="err">${esc(e.message)}</span>`;
       $('#t-meta').textContent = '';
     }
