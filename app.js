@@ -332,10 +332,15 @@
 
   // ---------- canvas ----------
   function resize() {
+    const previousWidth=W, previousHeight=H;
     const first = W === 0, aspectBefore = W / Math.max(1, H);
     dpr = Math.min(window.devicePixelRatio || 1, 2);
     W = canvas.clientWidth; H = canvas.clientHeight;
     canvas.width = W * dpr; canvas.height = H * dpr;
+    if(previousWidth>0&&previousHeight>0&&W>0&&H>0){
+      const ratio=Math.min(W,H)/Math.min(previousWidth,previousHeight);
+      d3.select(canvas).interrupt().call(zoom.transform,d3.zoomIdentity.translate(W/2+(tx-previousWidth/2)*ratio,H/2+(ty-previousHeight/2)*ratio).scale(k*ratio));
+    }
     // the karyogram picks its row count from the viewport aspect, so a rotation (landscape ↔ portrait) re-lays it out and refits
     if (!first && genome() && Math.abs(W / Math.max(1, H) - aspectBefore) > 0.25) { layoutGenome(false); refreshForces(); rebuild(false); sim.alpha(0.6).restart(); setTimeout(() => fitAll(500), 350); }   // fit once the pages have moved toward the new loci, as the G toggle does
   }
@@ -465,6 +470,7 @@
 
   // ---------- draw ----------
   function draw(now) {
+    const captionPaint = [];
     // explode tween
     const want = forceExplode || k >= 1.5 ? 1 : 0;
     if (want !== explodeTarget) { explodeTarget = want; }
@@ -559,16 +565,19 @@
         placed.push(best);
         const tl = Math.max(labelF, mouseW && Math.hypot(mouseW[0] - cx, mouseW[1] - cy) < rr ? 1 : 0);   // hovered lobe keeps its title
         if (tl < 0.02) return;
+        captionPaint.push(() => {
         ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
         ctx.textAlign = best.align; ctx.textBaseline = 'top';
         const lx=Math.max(best.x,Math.min(c.sx,best.x+best.w)), ly=Math.max(best.y,Math.min(c.sy,best.y+best.h));
         const length=Math.hypot(lx-c.sx,ly-c.sy)||1;
         ctx.beginPath();ctx.moveTo(c.sx+(lx-c.sx)*c.sr/length,c.sy+(ly-c.sy)*c.sr/length);ctx.lineTo(lx,ly);
-        ctx.strokeStyle=rgba(l.color,0.35*lobeVis*tl);ctx.lineWidth=1;ctx.stroke();
+        ctx.strokeStyle=rgba(l.color,0.65*lobeVis*tl);ctx.lineWidth=1.1;ctx.setLineDash([3,3]);ctx.stroke();ctx.setLineDash([]);
+        ctx.fillStyle=rgba('#080d16',0.9*tl);ctx.fillRect(best.x-4,best.y-2,best.w+8,best.h+4);
         ctx.font = `600 ${fs}px 'Clash Display', 'Satoshi', sans-serif`; ctx.fillStyle = rgba(l.color, 0.85 * lobeVis * tl); ctx.fillText(l.name, best.sx, best.y + 2);
         ctx.font = `500 ${fs2}px 'Satoshi', sans-serif`; ctx.fillStyle = rgba('#a7b2cc', 0.8 * lobeVis * tl); ctx.fillText(line2, best.sx, best.y + fs + 8);
         ctx.setTransform(dpr, 0, 0, dpr, 0, 0); ctx.translate(tx, ty); ctx.scale(k, k);
         ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic';
+        });
       });
     }
 
@@ -727,6 +736,7 @@
       const important = isSelf(n) || n.deg >= 18 || n.r > 12.5;
       const lv = (isChild(n) ? childLabelVis : isSelf(n) ? 1 : important ? Math.max(labelVis, clamp01((k - 0.45) / 0.25)) : labelVis) * labelOf(n);
       if (lv > 0.02 && (related || lv > 0.6)) {
+captionPaint.push(() => {ctx.shadowColor="#06080f";ctx.shadowBlur=4;
         const fs = isSelf(n) ? 15 : isChild(n) ? 10.5 : 12;
         ctx.font = `${isSelf(n) ? 600 : 500} ${sw(fs)}px 'Satoshi', sans-serif`;
         // genome layout: labels sit beside the band like gene annotations (right of a neuron, left of a sub-neuron) and lift above the synapse ladder
@@ -736,10 +746,13 @@
         ctx.fillStyle = rgba('#000000', 0.55 * lv * a); ctx.fillText(n.title, lx + sw(0.8), ly + sw(0.8));
         ctx.fillStyle = rgba(related ? '#f1f4ff' : '#9aa5c2', (related ? 0.95 : 0.5) * lv);
         ctx.fillText(n.title, lx, ly);
-      }
+
+ctx.shadowBlur=0;});
+}
     });
 
     // marquee rectangle (screen space)
+    captionPaint.forEach(paint => paint());
     if (marquee) {
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
       const x = Math.min(marquee.x0, marquee.x1), y = Math.min(marquee.y0, marquee.y1), w = Math.abs(marquee.x1 - marquee.x0), h = Math.abs(marquee.y1 - marquee.y0);

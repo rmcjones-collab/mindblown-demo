@@ -104,7 +104,7 @@
     const paths=[];
     for(const m of state.modifiers){
       const p=R.toScreen(m.x,m.y),t=R.screenOf(m.target),h=overlay.querySelector(`[data-modifier="${m.id}"]`);
-      h.style.left=p[0]+'px';h.style.top=p[1]+'px';h.hidden=!t;
+      h.style.left=p[0]+'px';h.style.top=p[1]+'px';h.hidden=false; // A folded/filtered target must not hide its placed controller.
       if(t)paths.push(`<path d="M${p[0]},${p[1]} L${t[0]},${t[1]}" stroke="#72dac4" stroke-dasharray="5 5"/>`);
     }
     for(const e of state.edges){const a=R.screenOf(e.from),b=R.screenOf(e.to);if(a&&b)paths.push(`<path d="M${a[0]},${a[1]} L${b[0]},${b[1]}" stroke="#d4ba80" stroke-dasharray="2 5"/>`);}

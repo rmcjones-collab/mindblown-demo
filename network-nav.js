@@ -17,11 +17,12 @@
  const owner=['Owner menu','https://www.perplexity.ai/computer/a/31a9ffb6-619a-4904-bd49-59ca1c658585'];
  window.MINDBLOWN_PUBLIC_CATALOG=catalog.map(([label,href])=>({label,href}));
  const style=document.createElement('style');style.textContent=`
- #lobes{display:block;max-height:calc(100dvh - 170px);overflow-y:auto;overscroll-behavior:contain}
+ #lobes{display:block;max-height:calc(100dvh - 170px);overflow-y:auto;overscroll-behavior:contain;scrollbar-gutter:stable;scrollbar-width:thin;scrollbar-color:#58737b transparent}
  #lobe-list{max-height:none;overflow:visible;flex:none}
  #top .stats{white-space:nowrap;max-width:none}
  @media(max-width:900px){#lobes{max-height:46dvh}}
- .network-picker{position:relative;flex:none!important;display:block!important}
+ @media(min-width:901px){#top{grid-template-columns:minmax(280px,1fr) minmax(180px,400px) auto}#top .brand,#top .brand .home,#top .brand .brand-text{min-width:0}#top .brand .title,#top .brand .sub{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}#top .brand .sub{max-width:min(35vw,450px)}}
+ .network-picker{position:relative;flex:none!important;display:block!important;width:max-content!important;max-width:100%;padding:0!important;margin-left:0!important;border:0!important;border-radius:0!important;background:none!important;backdrop-filter:none!important}
  .network-picker .nav-btn{display:flex;align-items:center;gap:9px;max-width:190px;padding:8px 11px;background:#17252c;border:1px solid #4c626a;border-radius:8px;color:#e6f0f2;font:12px system-ui;cursor:pointer}
  .network-picker .nav-btn .cur{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
  .network-picker .nav-menu{position:absolute;top:42px;left:0;right:auto;width:240px;min-width:0;max-width:calc(100vw - 24px);max-height:min(65dvh,500px);overflow:auto;overscroll-behavior:contain;list-style:none;padding:6px;margin:0;background:#101e26;border:1px solid #4c626a;border-radius:9px;z-index:100;box-shadow:0 15px 40px #0008}
@@ -55,7 +56,7 @@
    const label=document.createElement('span');label.textContent='Public networks';el.replaceChildren(label,...catalog.slice(5).map(x=>anchor(x)));
   });
   let old=document.querySelector('nav.brains');
-  if(!old&&!home){const header=document.querySelector('.topbar, #top, header');if(header){old=document.createElement('nav');old.className='brains';header.append(old);}}
+  if(!old&&!home){const header=document.querySelector('.topbar, #top, header');if(header){old=document.createElement('nav');old.className='brains';const brand=header.querySelector('.brand');(brand?.tagName==='DIV'?brand:header).append(old);}}
   if(!old){
    if(!home){const observer=new MutationObserver(()=>{if(document.querySelector('.topbar, #top, header')){observer.disconnect();install();}});observer.observe(document.body,{childList:true,subtree:true});setTimeout(()=>observer.disconnect(),15000);}
    return;
