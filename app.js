@@ -726,7 +726,8 @@
       // membrane: a bilayer, then the cytoplasm
       ctx.beginPath(); ctx.arc(c.cx, c.cy, c.Rc, 0, Math.PI * 2); ctx.fillStyle = rgba(c.color, 0.035); ctx.fill();
       ctx.lineWidth = sw(2); ctx.strokeStyle = rgba(c.color, 0.4); ctx.stroke();
-      ctx.beginPath(); ctx.arc(c.cx, c.cy, c.Rc - sw(5), 0, Math.PI * 2); ctx.lineWidth = sw(1); ctx.strokeStyle = rgba(c.color, 0.18); ctx.stroke();
+      const innerMembraneR = c.Rc - sw(5);
+      if (innerMembraneR > 0) { ctx.beginPath(); ctx.arc(c.cx, c.cy, innerMembraneR, 0, Math.PI * 2); ctx.lineWidth = sw(1); ctx.strokeStyle = rgba(c.color, 0.18); ctx.stroke(); }
       // territories: wedges of the nucleus in each lobe's colour, from the nucleolus out to the envelope
       c.terr.forEach(t => {
         ctx.beginPath(); ctx.arc(c.cx, c.cy, c.Rn - 2, t.a0, t.a1); ctx.arc(c.cx, c.cy, c.hubR * 0.9, t.a1, t.a0, true); ctx.closePath();
