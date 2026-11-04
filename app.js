@@ -1714,6 +1714,8 @@ ctx.shadowBlur=0;});
     if ((sb.title && sb.title !== (D.title || brainTitle())) || (sb.center && D.center && sb.center !== D.center)) { flash(`that layout belongs to another brain${sb.title ? ` (${sb.title})` : ''}`); return false; }
     const known = pages.filter(p => point(s.positions[p.id])).length;   // an older build of this brain still has most of its neurons
     if (known < Math.max(1, pages.length * 0.5)) { flash(`that layout belongs to another brain${s.brain && s.brain.title ? ` (${s.brain.title})` : ''}`); return false; }
+    // the scenario goes first: if it cannot be restored (a cycle, a malformed snapshot) nothing changes; older layouts have no scenario and leave the current one alone
+    if (s.modifiers && window.MINDBLOWN_MODIFIERS && !window.MINDBLOWN_MODIFIERS.restore(s.modifiers)) { flash('that layout’s Modifier scenario could not be restored · nothing changed'); return false; }
     clearSelection(); multi.clear(); marquee = null;
     if (s.lobes && typeof s.lobes === 'object') lobes.forEach(l => { if (typeof s.lobes[l.id] === 'boolean') lobeOn[l.id] = s.lobes[l.id]; });
     renderLobeList();
@@ -1734,7 +1736,6 @@ ctx.shadowBlur=0;});
     const kk = Math.min(9, Math.max(0.08, num(s.view && s.view.k, 0)));
     if (kk > 0 && s.view) d3.select(canvas).transition().duration(700).ease(d3.easeCubicInOut).call(zoom.transform, d3.zoomIdentity.translate(W / 2 - num(s.view.cx) * kk, H / 2 - num(s.view.cy) * kk).scale(kk));
     const sel = ownPage(s.selected); if (sel && visible(sel)) select(sel, { noZoom: true });
-    if (s.modifiers && window.MINDBLOWN_MODIFIERS) window.MINDBLOWN_MODIFIERS.restore(s.modifiers);   // older layouts have no scenario and leave the current one alone
     updateLevel(); updateHint(); updateStats();
     return true;
   }

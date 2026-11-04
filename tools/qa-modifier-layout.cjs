@@ -42,6 +42,16 @@ if (!url) { console.error('usage: node tools/qa-modifier-layout.cjs <brain-url>'
   check(new Set(idsNow).size === idsNow.length && idsNow.length === 2, `a new controller gets a fresh id (${idsNow})`);
   await p.click('#modifier-undo'); await p.click('#modifier-undo'); await p.waitForTimeout(200);
   check((await snap()).modifiers.length === 0, 'two undos remove the new controller and the restore');
+  // a saved layout whose scenario cannot be restored (a cycle) is refused whole: the scenario and the arrangement stay as they are
+  await p.evaluate(([a, c]) => { for (let i = 0; i < localStorage.length; i++) { const k = localStorage.key(i); if (k.startsWith('mindblown.layouts.')) {
+    const list = JSON.parse(localStorage.getItem(k)); const bad = JSON.parse(JSON.stringify(list[0])); bad.name = 'QA cyclic';
+    Object.keys(bad.positions).forEach(id => { bad.positions[id] = [9999, 9999]; });
+    bad.modifiers = { modifiers: [], edges: [{ from: a, to: c, weight: 0.5 }, { from: c, to: a, weight: 0.5 }] }; localStorage.setItem(k, JSON.stringify([bad])); } } }, [a, c]);
+  await load();
+  await p.click('#save-layout'); await p.waitForTimeout(250); await p.click('#layouts-list .apply'); await p.waitForTimeout(600);
+  const hint = await p.evaluate(() => document.body.innerText);
+  check((await snap()).modifiers.length === 0 && (await snap()).edges.length === 0, 'a layout with a cyclic scenario leaves the current scenario alone');
+  check(/could not be restored · nothing changed/.test(hint), 'and says nothing changed');
   // hostile scenarios
   const hostile = await p.evaluate(([a, c]) => {
     const M = window.MINDBLOWN_MODIFIERS, out = {};
