@@ -1715,7 +1715,7 @@ ctx.shadowBlur=0;});
     const known = pages.filter(p => point(s.positions[p.id])).length;   // an older build of this brain still has most of its neurons
     if (known < Math.max(1, pages.length * 0.5)) { flash(`that layout belongs to another brain${s.brain && s.brain.title ? ` (${s.brain.title})` : ''}`); return false; }
     // the scenario goes first: if it cannot be restored (a cycle, a malformed snapshot) nothing changes; older layouts have no scenario and leave the current one alone
-    if (s.modifiers && window.MINDBLOWN_MODIFIERS && !window.MINDBLOWN_MODIFIERS.restore(s.modifiers)) { flash('that layout’s Modifier scenario could not be restored · nothing changed'); return false; }
+    if (Object.prototype.hasOwnProperty.call(s, 'modifiers') && window.MINDBLOWN_MODIFIERS && !window.MINDBLOWN_MODIFIERS.restore(s.modifiers)) { flash('that layout’s Modifier scenario could not be restored · nothing changed'); return false; }
     clearSelection(); multi.clear(); marquee = null;
     if (s.lobes && typeof s.lobes === 'object') lobes.forEach(l => { if (typeof s.lobes[l.id] === 'boolean') lobeOn[l.id] = s.lobes[l.id]; });
     renderLobeList();

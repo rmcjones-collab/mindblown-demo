@@ -52,6 +52,9 @@ if (!url) { console.error('usage: node tools/qa-modifier-layout.cjs <brain-url>'
   const hint = await p.evaluate(() => document.body.innerText);
   check((await snap()).modifiers.length === 0 && (await snap()).edges.length === 0, 'a layout with a cyclic scenario leaves the current scenario alone');
   check(/could not be restored · nothing changed/.test(hint), 'and says nothing changed');
+  await p.evaluate(() => { for (let i = 0; i < localStorage.length; i++) { const k = localStorage.key(i); if (k.startsWith('mindblown.layouts.')) { const l = JSON.parse(localStorage.getItem(k)); l[0].modifiers = null; localStorage.setItem(k, JSON.stringify(l)); } } });
+  await load(); await p.click('#save-layout'); await p.waitForTimeout(250); await p.click('#layouts-list .apply'); await p.waitForTimeout(600);
+  check(/could not be restored · nothing changed/.test(await p.evaluate(() => document.body.innerText)), 'a layout with "modifiers": null is refused too');
   // hostile scenarios
   const hostile = await p.evaluate(([a, c]) => {
     const M = window.MINDBLOWN_MODIFIERS, out = {};
@@ -62,6 +65,9 @@ if (!url) { console.error('usage: node tools/qa-modifier-layout.cjs <brain-url>'
       edges: [{ from: a, to: c, weight: 0.5 }, { from: a, to: c, weight: 0.5 }, { from: a, to: c, weight: 4 }, { from: 'toString', to: c, weight: 0.1 }] });
     out.kept = M.snapshot();
     out.many = M.restore({ modifiers: Array.from({ length: 30 }, (_, i) => ({ id: 'M' + (i + 10), target: a, gain: 1, x: i, y: i })), edges: [] }) && M.snapshot().modifiers.length;
+    out.allBad = M.restore({ modifiers: [{ id: 'M1', target: 'nope', gain: 1, x: 0, y: 0 }], edges: [{ from: 'nope', to: c, weight: 0.5 }] });
+    out.tooMany = M.restore({ modifiers: [], edges: Array.from({ length: 30000 }, () => ({ from: a, to: c, weight: 0.1 })) });
+    out.afterBad = M.snapshot().modifiers.length;
     out.cycle = M.restore({ modifiers: [], edges: [{ from: a, to: c, weight: 0.5 }, { from: c, to: a, weight: 0.5 }] });
     out.afterCycle = M.snapshot().modifiers.length;
     return out;
@@ -69,6 +75,7 @@ if (!url) { console.error('usage: node tools/qa-modifier-layout.cjs <brain-url>'
   check(hostile.junk.every(x => x === false), 'non-scenario values are refused');
   check(hostile.kept.modifiers.map(m => m.id).join() === 'M1,M5' && !('evil' in hostile.kept.modifiers[1]) && hostile.kept.edges.length === 1, `only well-formed controllers and connections are kept (${JSON.stringify(hostile.kept)})`);
   check(hostile.many === 12, `at most 12 controllers (${hostile.many})`);
+  check(hostile.allBad === false && hostile.tooMany === false && hostile.afterBad === 12, 'entries with none valid, or more connections than the brain can hold, are refused and the current scenario stays');
   check(hostile.cycle === false && hostile.afterCycle === 12, 'a cyclic scenario is refused and the current one stays');
   check(!(await p.$('img[src=x]')), 'no injected markup');
   check(errs.length === 0, `no console errors ${JSON.stringify(errs)}`);
