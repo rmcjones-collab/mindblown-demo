@@ -35,7 +35,7 @@ const fs = require('fs');
   } else check(!(await p.$('#brain-tools')), 'no empty Brains group without a Modifier Brain');
   // 2. layouts flyout → Genome
   await p.click('#layout-menu'); await p.waitForTimeout(250);
-  check((await QA()).fly === 'layout-flyout' && await p.locator('#layout-flyout .lay').count() === 5, 'layout flyout opens with 5 rows');
+  check((await QA()).fly === 'layout-flyout' && await p.locator('#layout-flyout .lay').count() === 6, 'layout flyout opens with 6 rows');
   await p.screenshot({ path: 'qa/save_layout_menu.png' });
   await p.click('#layout-toggle'); await p.waitForTimeout(1700);
   let s = await QA(); check(s.layout === 'genome' && s.fly === null, 'Genome row switches layout and closes the flyout');

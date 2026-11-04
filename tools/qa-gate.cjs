@@ -9,9 +9,17 @@ if (!url) { console.error('usage: node tools/qa-gate.cjs <brain-url>'); process.
 (async () => {
   const b = await chromium.launch(); const errs = [], fails = [];
   const check = (ok, what) => { console.log((ok ? 'ok   ' : 'FAIL ') + what); if (!ok) fails.push(what); };
+  const settle = async (pg = p) => {   // bounded wait until the map stops moving: a sampled neuron holds still (<0.5 px) across three 150 ms reads
+    let last = null, still = 0;
+    for (let i = 0; i < 60 && still < 3; i++) { const q = await pg.evaluate(() => { const Q = window.MINDBLOWN_QA, ids = window.MINDBLOWN && window.MINDBLOWN.pages ? window.MINDBLOWN.pages.slice(0, 3).map(x => x.id) : []; return Q ? ids.map(id => Q.screenOf(id)).filter(Boolean) : []; });
+      still = last && q.length && q.every((v, j) => last[j] && Math.hypot(v[0] - last[j][0], v[1] - last[j][1]) < 0.5) ? still + 1 : 0; last = q; await pg.waitForTimeout(150); }
+    if (still < 3) throw new Error('settle: the map did not hold still within 60 reads' + (last && last.length ? '' : ' (no neuron positions were readable)'));
+  };
   let p = await b.newPage({ viewport: { width: 1440, height: 900 } });
   p.on('pageerror', e => errs.push(e.message)); p.on('console', m => { if (m.type() === 'error' && !/favicon/.test(m.text())) errs.push(m.text()); });
-  await p.goto(url, { waitUntil: 'networkidle' }); await p.waitForTimeout(2600);
+  await p.goto(url, { waitUntil: 'networkidle' });
+  if (!/build\.html/.test(url)) { await p.waitForFunction(() => window.MINDBLOWN_QA && window.MINDBLOWN_MODIFIERS && window.MINDBLOWN_RENDERER, null, { timeout: 30000 }); }
+  if (!/build\.html/.test(url)) await settle(); else await p.waitForTimeout(1800);   // canvas clicks must land on a settled map
   let off = [0, 0], page = p;
   if (/build\.html/.test(url)) {   // Build: answer the interview until there are neurons, then check the Explode view
     for (let i = 0; i < 25; i++) {
@@ -29,13 +37,26 @@ if (!url) { console.error('usage: node tools/qa-gate.cjs <brain-url>'); process.
 
   // 1. modifier brains
   check(!!(await p.$('#rail #modifiers-open')), 'Modifier Brain button is in the rail on this canvas');
-  await p.click('#modifiers-open'); await p.waitForTimeout(300);
-  check(await p.$eval('#modifier-panel', e => !e.hidden), 'Modifier panel opens');
+  await p.click('#modifiers-open');
+  check(!!(await p.waitForSelector('#modifier-panel:not([hidden])', { timeout: 5000 }).catch(() => null)), 'Modifier panel opens');
   const ids = await p.$$eval('#modifier-target option', o => o.map(x => x.value));
   check(ids.length >= 2, `targets listed (${ids.length})`);
   const [a, c] = ids;
   await p.selectOption('#modifier-target', a); await p.click('#modifier-beside'); await p.waitForTimeout(300);
   check(await p.$$eval('#modifier-list .modifier-card', x => x.length) === 1 && await p.$$eval('#modifier-overlay button', x => x.length) >= 1, 'a modifier is placed beside the target, with a canvas handle');
+  // dragging the canvas handle moves it without also opening the panel; a plain click still opens it
+  await p.click('#modifier-close'); await p.waitForSelector('#modifier-panel[hidden]', { state: 'attached', timeout: 5000 });
+  const hb = await (await p.$('#modifier-overlay button')).boundingBox(), mx0 = (await p.evaluate(() => window.MINDBLOWN_MODIFIERS.snapshot().modifiers[0].x));
+  await page.mouse.move(hb.x + hb.width / 2, hb.y + hb.height / 2); await page.mouse.down();   // boundingBox() is already in main-frame viewport coordinates
+  await page.mouse.move(hb.x + hb.width / 2 + 40, hb.y + hb.height / 2 + 25, { steps: 6 }); await page.mouse.up(); await p.waitForTimeout(200);
+  check(await p.$eval('#modifier-panel', e => e.hidden) && (await p.evaluate(() => window.MINDBLOWN_MODIFIERS.snapshot().modifiers[0].x)) !== mx0, 'dragging a handle moves it and does not open the panel');
+  await p.click('#modifier-overlay button');
+  check(!!(await p.waitForSelector('#modifier-panel:not([hidden])', { timeout: 5000 }).catch(() => null)), 'a plain click on the handle opens the panel');
+  await p.click('#modifier-close'); await p.waitForSelector('#modifier-panel[hidden]', { state: 'attached', timeout: 5000 });
+  const hb2 = await (await p.$('#modifier-overlay button')).boundingBox(), cx = hb2.x + hb2.width / 2, cy = hb2.y + hb2.height / 2;
+  await page.mouse.move(cx, cy); await page.mouse.down(); await page.mouse.move(cx + 40, cy + 25, { steps: 5 }); await page.mouse.move(cx, cy, { steps: 5 }); await page.mouse.up(); await p.waitForTimeout(200);
+  check(await p.$eval('#modifier-panel', e => e.hidden), 'a drag that returns to its start still does not open the panel');
+  await p.click('#modifier-overlay button'); await p.waitForSelector('#modifier-panel:not([hidden])', { timeout: 5000 });
   await p.$eval('#modifier-dependencies', d => { d.open = true; });
   await p.selectOption('#modifier-from', a); await p.selectOption('#modifier-to', c); await p.fill('#modifier-weight', '0.5'); await p.click('#modifier-add-edge'); await p.waitForTimeout(200);
   await p.$eval('#modifier-list input[type=range]', r => { r.value = '2'; r.dispatchEvent(new Event('input')); r.dispatchEvent(new Event('change')); }); await p.waitForTimeout(200);
