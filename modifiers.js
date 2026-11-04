@@ -128,7 +128,7 @@
   function restore(raw){
     if(!raw||typeof raw!=='object'||!Array.isArray(raw.modifiers)||!Array.isArray(raw.edges))return false;
     const fin=v=>typeof v==='number'&&Number.isFinite(v),known=new Set(ids);
-    const mods=raw.modifiers.filter(m=>m&&typeof m.id==='string'&&/^M\d{1,6}$/.test(m.id)&&known.has(m.target)&&fin(m.gain)&&m.gain>=0&&m.gain<=2&&fin(m.x)&&fin(m.y))
+    const mods=raw.modifiers.filter(m=>m&&typeof m.id==='string'&&/^M\d{1,16}$/.test(m.id)&&Number.isSafeInteger(+m.id.slice(1))&&known.has(m.target)&&fin(m.gain)&&m.gain>=0&&m.gain<=2&&fin(m.x)&&fin(m.y))
       .slice(0,12).map(m=>({id:m.id,target:m.target,gain:m.gain,x:m.x,y:m.y}));
     const seen=new Set(),edges=[];
     const maxEdges=Math.min(ids.length*(ids.length-1)/2,20000);if(raw.edges.length>maxEdges)return false;   // more than the largest acyclic set over this brain's neurons: refused rather than cut short

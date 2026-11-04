@@ -163,12 +163,14 @@
   // 'tree' (F) as a family tree, the hub the ancestor and each lobe a branch. A page may start in one with window.MINDBLOWN_OPTIONS = { layout: 'genome' }
   // or a #layout=genome hash; the tool buttons, the switches in the lobes panel and the keys toggle them.
   // 'table' (T) seats the brain around a round table with no head.
-  const LAYOUTS = ['neural', 'genome', 'cell', 'tree', 'table'];
+  // 'coil' (Z, for zap) makes the brain a Tesla coil in discharge: the hub in the toroid, every lobe a lightning streamer, every neuron a kink of it.
+  const LAYOUTS = ['neural', 'genome', 'cell', 'tree', 'table', 'coil'];
   // the page's default layout, then the link hash on top of it: a shared `#layout=` link (including `layout=neural`) opens as sent whatever the page defaults to
   const pageLayout = LAYOUTS.includes(OPT.layout) ? OPT.layout : 'neural';
   const hashLayout = () => { const m = /[#&]layout=(\w+)\b/.exec(location.hash); return m && LAYOUTS.includes(m[1]) ? m[1] : null; };
   let layout = hashLayout() || pageLayout;
-  const genome = () => layout === 'genome', cell = () => layout === 'cell', tree = () => layout === 'tree', table = () => layout === 'table';
+  const genome = () => layout === 'genome', cell = () => layout === 'cell', tree = () => layout === 'tree', table = () => layout === 'table', coil = () => layout === 'coil';
+  const radial = () => table() || coil();   // layouts whose synapse ladders and labels run along a per-neuron radius (n.gux, n.guy)
   const mapped = () => layout !== 'neural';   // any map: neurons are held at loci, connections are drawn but do not pull
 
   // ---------- genome layout: every brain mapped like a karyotype ----------
@@ -191,7 +193,7 @@
   } else lobes.filter(l => !selfLobe(l)).forEach(l => { const c = { id: l.id, name: l.name, color: l.color, hub: null, segs: [l] }; chromos.push(c); chromoOf[l.id] = c; });
   // every map is made of groups the user can pick up whole: chromosomes here, cells in the karyocyte layout, branches in the family tree.
   // A group has .loci (its top-level neurons), .hubOn (a hub neuron that sits inside it) and .on; relayout() stamps p.grp on each member
-  const groupsNow = () => genome() ? chromos : cell() ? cells : tree() ? branches : table() ? seats : [];
+  const groupsNow = () => genome() ? chromos : cell() ? cells : tree() ? branches : table() ? seats : coil() ? streamers : [];
   const grpOf = n => (isChild(n) ? n.parent : n).grp || null;
   const sameGroup = (a, b) => !!grpOf(a) && grpOf(a) === grpOf(b);
   const groupMembers = g => [...(g.hubOn ? [g.hubOn, ...g.hubOn.children] : []), ...g.loci, ...g.loci.flatMap(p => p.children)];
@@ -206,7 +208,9 @@
   }
   const mapMoved = () => groupsNow().some(g => g.ox || g.oy) || pages.some(p => p.gox || p.goy);
   function dropGroups(d) { [...d.groups.flatMap(groupMembers), ...d.loose, ...d.loose.flatMap(p => p.children)].forEach(p => { if (!p.pinned) { p.fx = null; p.fy = null; } }); refreshForces(); }
-  function resetMap() { groupsNow().forEach(g => { g.ox = g.oy = 0; }); pages.forEach(p => { p.gox = p.goy = 0; }); relayout(false); refreshForces(); sim.alpha(0.5).restart(); }
+  // R puts every group back on its computed locus at once (a snap, not a glide): a long streamer's kinks rest against each other, so a glide
+  // can settle a few pixels off the map
+  function resetMap() { groupsNow().forEach(g => { g.ox = g.oy = 0; }); pages.forEach(p => { p.gox = p.goy = 0; }); relayout(true); refreshForces(); sim.alpha(0.5).restart(); }
   // The map is static: slots and columns are sized for the unfolded, exploded state up front, so zooming never shifts a locus.
   // the room a locus needs along the bar: its own body (drawn ~1.6× at karyogram zoom) or its sub-neuron column, whichever is taller
   const kidPitch = c => 2 * c.r * 1.5 + 8;
@@ -466,7 +470,89 @@
     });
     if (snap) snapToMap();
   }
-  const relayout = snap => { if (genome()) layoutGenome(snap); else if (cell()) layoutCell(snap); else if (tree()) layoutTree(snap); else if (table()) layoutTable(snap); };
+  // ---------- coil layout (Z): the Tesla coil ----------
+  // The brain is a Tesla coil in discharge. The hub (a brain's self lobe; on the network screen the composition's centre) stands in the
+  // toroid, the top load of the coil; the secondary winding and the primary stand beneath it, so the map reads as the apparatus seen from the
+  // side. Every lobe (every brain on the network screen) is a streamer: a lightning channel that leaves the toroid rim and runs out through
+  // the upper sky in kinks, one kink per neuron, the best-connected neurons nearest the terminal. A long lobe forks into two channels; a
+  // brain's lobes fork off its trunk, whose root holds the brain's hub. Synapse ladders strike inward, perpendicular to the channel (the
+  // table's radial-ladder machinery, with each kink's own perpendicular as the radius); sub-neurons stand on the channel's outer side.
+  // Kinks are hashed from the streamer and the kink index, so a reload draws the same bolt; only the flicker and the discharges move.
+  const CL = { R0: 160, fan: Math.PI * 1.36, top: -Math.PI / 2, kink: 0.6, step: 46, trunk: 110, fork: 12, forkAt: 0.45, ry: 0.36, body: 1.15, turns: 14 };
+  // on the network screen the page named by D.center (the composition's centre) leaves its brain's streamer and stands in the toroid
+  const coilCentre = brainsIn && D.center ? pageById[D.center] || null : null;
+  const streamers = brainsIn
+    ? chromos.map(c => ({ id: c.id, name: c.name, color: c.color, hub: c.hub === coilCentre ? null : c.hub, segs: c.segs }))
+    : lobes.filter(l => !selfLobe(l)).map(l => ({ id: l.id, name: l.name, color: l.color, hub: null, segs: [l] }));
+  const streamerIdx = {}; streamers.forEach((s, i) => { streamerIdx[s.id] = i; });
+  let coilR = CL.R0;   // the toroid's radius once laid out
+  const hash01 = (a, b) => { let h = (Math.imul(a, 374761393) + Math.imul(b, 668265263) + 1013904223) | 0; h = Math.imul(h ^ (h >>> 13), 1274126177); h ^= h >>> 16; return (h >>> 0) / 4294967296; };
+  const coilPulses = [];   // discharges running out along the channels: { s, c (chain), t, speed }
+  // one channel of kinks from a start point along a heading: each kink a neuron (its slot sets the step), the heading wandering by a bounded,
+  // hashed amount and leaning back toward the channel's own heading so a channel never curls into its neighbour's sky
+  function chain(s, ps, x0, y0, head, spread, seed, side) {
+    let x = x0, y = y0, h = head; const pts = [[x, y]];
+    ps.forEach((p, i) => {
+      const z = (i % 2 ? 1 : -1) * (0.3 + 0.7 * hash01(seed, i + 1)), drift = i ? Math.atan2(y - y0, x - x0) : head, lean = Math.atan2(Math.sin(drift - head), Math.cos(drift - head));
+      h = head + z * spread - lean * 0.5;
+      const step = Math.max(CL.step, slotH(p) * 0.9) + (i ? 0 : 14);
+      x += Math.cos(h) * step; y += Math.sin(h) * step;
+      p.gx = x + (s.ox || 0); p.gy = y + (s.oy || 0); p.gh = h;
+      // the ladder's radius is the channel's perpendicular on the streamer's outer side (away from the zenith), so labels fan outward
+      p.gux = -Math.sin(h) * side; p.guy = Math.cos(h) * side;
+      placeKidsRadial(p); pts.push([x, y]);
+    });
+    return { pts, ps, x, y, head: h, len: pts.length > 1 ? d3.sum(pts.slice(1), (q, i) => Math.hypot(q[0] - pts[i][0], q[1] - pts[i][1])) : 0 };
+  }
+  // a lobe's neurons run down one channel, or fork into two once the lobe is long; the fork opens by ±a third of the lobe's sky
+  function lobeChains(s, ps, x0, y0, head, w, seed, side) {
+    const spread = Math.min(CL.kink, w / 1.6);
+    if (ps.length <= 2 * CL.fork) return [chain(s, ps, x0, y0, head, spread, seed, side)];
+    const k0 = Math.max(2, Math.round(ps.length * CL.forkAt)), trunk = chain(s, ps.slice(0, k0), x0, y0, head, spread * 0.6, seed, side);
+    const rest = ps.slice(k0), L = rest.filter((_, i) => i % 2 === 0), R = rest.filter((_, i) => i % 2 === 1);
+    const bl = chain(s, L, trunk.x, trunk.y, head - w / 3.2, spread * 0.7, seed + 1, side), br = chain(s, R, trunk.x, trunk.y, head + w / 3.2, spread * 0.7, seed + 2, side);
+    bl.from = br.from = trunk;   // the branches leave the trunk's tip; a discharge runs the trunk first
+    return [trunk, bl, br];
+  }
+  function layoutCoil(snap) {
+    pages.forEach(p => { p.grp = null; p.gflat = false; });
+    streamers.forEach(s => {
+      s.lobesOn = s.segs.map(l => ({ l, ps: pages.filter(p => p.lobe === l.id && p !== s.hub && p !== coilCentre && !isChild(p) && pageOn(p)).sort((a, b) => b.deg - a.deg || a.title.localeCompare(b.title)) })).filter(x => x.ps.length);
+      s.hubOn = s.hub && pageOn(s.hub) ? s.hub : null;
+      s.loci = s.lobesOn.flatMap(x => x.ps); s.on = s.loci.length > 0 || !!s.hubOn;
+      s.reach = Math.max(0, ...s.loci.map(synReach), ...s.loci.flatMap(p => p.children.filter(pageOn)).map(x => 34 + 2 * x.r * 1.5 + synReach(x)));
+      if (s.on) { s.loci.forEach(p => { p.grp = s; }); if (s.hubOn) s.hubOn.grp = s; }
+    });
+    const on = streamers.filter(s => s.on);
+    // wide lobes take more sky; the toroid grows until every streamer's ladders (inward) and labels (outward) have room at its root
+    const share = on.map(s => Math.sqrt(s.loci.length + 1) + (s.lobesOn.length > 1 ? 1 + s.lobesOn.length * 0.5 : 1.2)), total = d3.sum(share) || 1;
+    coilR = Math.max(CL.R0, Math.min(420, 0.26 * Math.max(0, ...on.map((s, i) => (Math.max(s.reach, 40) + 120) / (CL.fan * share[i] / total)))));
+    let a = CL.top - CL.fan / 2;
+    on.forEach((s, i) => {
+      const w = CL.fan * share[i] / total, head = a + w / 2; a += w;
+      s.head = head; s.a0 = head - w / 2; s.a1 = head + w / 2;
+      const side = Math.cos(head) >= -0.02 ? 1 : -1, seed = (streamerIdx[s.id] + 1) * 7919;
+      // the root sits on the rim of the toroid, an ellipse because the toroid is seen a little from above
+      let x = Math.cos(head) * coilR, y = Math.sin(head) * coilR * CL.ry; s.root = [x, y]; s.side = side;
+      const h = s.hubOn;
+      if (h) { x += Math.cos(head) * (h.r * 1.6 + 18); y += Math.sin(head) * (h.r * 1.6 + 18); h.gx = x + (s.ox || 0); h.gy = y + (s.oy || 0); h.gh = head; h.gux = -Math.sin(head) * side; h.guy = Math.cos(head) * side; placeKidsRadial(h); }
+      s.chains = [];
+      if (s.lobesOn.length <= 1) { if (s.lobesOn.length) s.chains = lobeChains(s, s.lobesOn[0].ps, x, y, head, w, seed, side).map(c => Object.assign(c, { l: s.lobesOn[0].l })); s.fork = [x, y]; }
+      else {
+        // a brain on the network screen: a bare trunk out of the hub, then one channel per lobe fanned across the brain's sky by size
+        const tx = x + Math.cos(head) * CL.trunk, ty = y + Math.sin(head) * CL.trunk; s.fork = [tx, ty];
+        const ws = s.lobesOn.map(x => Math.sqrt(x.ps.length) + 1), wt = d3.sum(ws); let b = head - w / 2;
+        s.lobesOn.forEach((x, j) => { const lw = w * ws[j] / wt; s.chains.push(...lobeChains(s, x.ps, tx, ty, b + lw / 2, lw, seed + 10 * (j + 1), side).map(c => Object.assign(c, { l: x.l }))); b += lw; });
+      }
+      s.tip = s.chains.length ? s.chains.reduce((m, c) => (c.len > m.len ? c : m), s.chains[0]) : null;
+    });
+    // a single brain's hub (the self lobe) stands in the toroid; on the network screen the composition's centre does
+    const inToroid = pages.filter(p => (isSelf(p) || p === coilCentre) && !isChild(p) && pageOn(p) && !p.grp);   // a non-self network centre still gets its locus
+    inToroid.forEach((p, i) => { const m = inToroid.length, ang = -Math.PI / 2 + (Math.PI * 2 * i) / m, rr = m === 1 ? 0 : coilR * 0.42; p.gx = Math.cos(ang) * rr + (p.gox || 0); p.gy = Math.sin(ang) * rr * CL.ry + (p.goy || 0); p.gux = 0; p.guy = -1; p.gh = -Math.PI / 2; p.gflat = true; placeKidsRadial(p); p.children.forEach(x => { x.gflat = true; }); });
+    coilPulses.length = 0;
+    if (snap) snapToMap();
+  }
+  const relayout = snap => { if (genome()) layoutGenome(snap); else if (cell()) layoutCell(snap); else if (tree()) layoutTree(snap); else if (table()) layoutTable(snap); else if (coil()) layoutCoil(snap); };
   let mouseW = null;                      // cursor in world units, for lobe hover while labels are off
   // tools: 'select' = left-drag draws a marquee and moves neurons; 'pan' = left-drag pans (the classic behaviour)
   let mode = 'select', spaceDown = false;
@@ -519,7 +605,7 @@
   // orbit force: each synapse seeks an evenly spaced slot around its neuron (the dandelion explosion)
   function orbitForce(alpha) {
     const st = 0.3 * alpha;
-    const ladder = genome() || tree(), c = cell(), tb = table();
+    const ladder = genome() || tree(), c = cell(), tb = radial();
     for (const n of activeNodes) {
       if (n.kind !== 'syn') continue;
       const p = pageById[n.page], m = p.nSyn;
@@ -626,8 +712,9 @@
   function fitTransform() {
     const vp = pages.filter(p => visible(p) && !isChild(p));
     const xs = vp.map(p => p.x), ys = vp.map(p => p.y);
-    const mx = genome() ? 120 : tree() ? 60 : cell() ? 40 : table() ? 120 : brainsIn ? 260 : 150, my = genome() ? 150 : tree() ? 80 : cell() ? 40 : table() ? 120 : brainsIn ? 260 : 170;
+    const mx = genome() ? 120 : tree() ? 60 : cell() ? 40 : radial() ? 120 : brainsIn ? 260 : 150, my = genome() ? 150 : tree() ? 80 : cell() ? 40 : radial() ? 120 : brainsIn ? 260 : 170;
     // the table is fitted as a whole: a sparse brain's chairs cover only part of a ring that still has to be on screen, with room behind the chairs for sub-neurons
+    if (coil()) { xs.push(-coilR * 1.15, coilR * 1.15); ys.push(-coilR * CL.ry, coilR * CL.ry + 14 + coilR * CL.body + 16); }
     if (table()) { const tr = tableR + TB.ring / 2 + Math.max(0, ...seats.filter(c => c.on).map(c => c.kidR)); xs.push(-tr, tr); ys.push(-tr, tr); }
     // the family tree fits its plates and spines, which stand above and beside the neurons
     if (tree()) branches.filter(b => b.on).forEach(b => { xs.push(b.x0, b.x1); ys.push(b.py - T.plateH, b.y1); });
@@ -635,7 +722,7 @@
     if (cell()) cells.filter(c => c.on).forEach(c => { xs.push(c.cx - c.Rc, c.cx + c.Rc); ys.push(c.cy - c.Rc, c.cy + c.Rc); });
     const minX = Math.min(...xs) - mx, maxX = Math.max(...xs) + mx, minY = Math.min(...ys) - my, maxY = Math.max(...ys) + my;
     const padL = window.innerWidth <= 900 ? 0 : 230; // keep the fitted brain clear of the lobes legend on desktop
-    const lx = brainsIn && !mapped() ? Math.min(210, W * 0.16) : table() ? Math.min(130, W * 0.18) : 0, ly = genome() || cell() ? 40 : table() ? 45 : brainsIn && !mapped() ? 30 : 0;   // pixels reserved for titles beside/above the outer lobes (above the bars or cells in the maps)
+    const lx = brainsIn && !mapped() ? Math.min(210, W * 0.16) : radial() ? Math.min(130, W * 0.18) : 0, ly = genome() || cell() ? 40 : radial() ? 45 : brainsIn && !mapped() ? 30 : 0;   // pixels reserved for titles beside/above the outer lobes (above the bars or cells in the maps)
     const kk = Math.min((W - 60 - padL - 2 * lx) / (maxX - minX), (H - (brainsIn ? 150 : 200) - 2 * ly) / (maxY - minY)) * 0.96;
     const cx = (minX + maxX) / 2, cy = (minY + maxY) / 2;
     return { kk, tx: padL + (W - padL) / 2 - cx * kk, ty: H / 2 + 12 - cy * kk };
@@ -656,6 +743,7 @@
   // ---------- colour helpers ----------
   const colorCache = {};
   function rgba(hex, a) {
+    a = Math.round(a * 200) / 200;   // quantised so per-frame flicker (coil discharge, sparks) cannot grow the cache without bound
     const key = hex + a; if (colorCache[key]) return colorCache[key];
     const c = d3.color(hex); c.opacity = a; return (colorCache[key] = c.formatRgb());
   }
@@ -666,20 +754,38 @@
 
   // ---------- pulses (signals travelling along connections) ----------
   const pulses = [];
-  function spawnPulse(l, fast) {
+  // electric synapses (data-gated): a page with `spark: true` (or every page when the dataset says `spark: true`) discharges. Its synapse
+  // tethers are drawn as small lightning strokes and its outgoing connections carry bolts instead of beads: a pulse always leaves the
+  // sparking neuron, and a synapse that reaches another neuron fires toward it. Other brains render exactly as before.
+  const sparkOf = n => n.spark !== undefined ? !!n.spark : !!D.spark, sparkAny = !!D.spark || pages.some(p => p.spark);
+  const sparkDir = l => (sparkOf(l.source) && !sparkOf(l.target) ? 1 : sparkOf(l.target) && !sparkOf(l.source) ? -1 : Math.random() < 0.5 ? 1 : -1);
+  function spawnPulse(l, fast, spark) {
     if (!l || pulses.length > 60) return;
-    pulses.push({ l, t: 0, speed: (fast ? 0.028 : 0.009) + Math.random() * 0.006, dir: Math.random() < 0.5 ? 1 : -1 });
+    const sp = spark || (l.kind === 'pp' && (sparkOf(l.source) || sparkOf(l.target)));
+    pulses.push({ l, t: 0, speed: (fast ? 0.028 : sp ? 0.016 : 0.009) + Math.random() * 0.006, dir: l.kind === 'sx' ? 1 : sp ? sparkDir(l) : Math.random() < 0.5 ? 1 : -1, spark: sp, seed: Math.floor(Math.random() * 1e6) });
   }
-  let lastPulse = 0;
+  let lastPulse = 0, lastSpark = 0, lastDischarge = 0;
+  // a lightning stroke from one point to another: kinks displaced across the line by hashed amounts that re-roll every 90 ms (the flicker)
+  function bolt(x0, y0, x1, y1, seed, amp, n = 4) {
+    const dx = x1 - x0, dy = y1 - y0, L = Math.hypot(dx, dy) || 1, nx = -dy / L, ny = dx / L, f = reduceMotion ? 0 : Math.floor(performance.now() / 90);
+    ctx.moveTo(x0, y0);
+    for (let i = 1; i < n; i++) { const t = i / n, z = hash01(seed + i * 131, f) * 2 - 1; ctx.lineTo(x0 + dx * t + nx * z * amp, y0 + dy * t + ny * z * amp); }
+    ctx.lineTo(x1, y1);
+  }
+  const linkSeed = l => l.seed || (l.seed = 1 + Math.floor(hash01((l.source.idx ?? l.source.i ?? 3) * 17 + 5, (l.target.idx ?? l.target.i ?? 7) * 29 + 11) * 1e6));
 
   // ---------- map drawing ----------
   // connections bend in the maps: along one chromosome or branch they bow out to the right like a Circos ribbon, inside one cell they bow
   // toward the nucleolus, and between groups they arch
   const ctrlOf = l => {
-    if (!mapped()) return null;
+    if (!mapped() || l.kind !== 'pp') return null;   // only page links are drawn curved; synapse bolts (sx) stay straight, so their pulses must too
     const a = l.source, b = l.target, mx = (a.x + b.x) / 2, my = (a.y + b.y) / 2;
     if (table()) {   // chords across the table bow toward the empty centre; neighbours at one seat take a shallow arc just inside the ring
       if (sameGroup(a, b)) { const d = Math.hypot(mx, my) || 1, pull = Math.min(90, 10 + Math.hypot(b.x - a.x, b.y - a.y) * 0.3); return [mx - mx / d * pull, my - my / d * pull]; }
+      return [mx * 0.3, my * 0.3];
+    }
+    if (coil()) {   // inside one streamer a connection bows a little toward the terminal; across streamers it arches through the toroid's sky
+      if (sameGroup(a, b)) return [mx * 0.82, my * 0.82];
       return [mx * 0.3, my * 0.3];
     }
     if (sameGroup(a, b)) {
@@ -700,6 +806,91 @@
   function roundRect(x, y, w, h, r) { r = Math.min(r, w / 2, h / 2); ctx.beginPath(); ctx.moveTo(x + r, y); ctx.arcTo(x + w, y, x + w, y + h, r); ctx.arcTo(x + w, y + h, x, y + h, r); ctx.arcTo(x, y + h, x, y, r); ctx.arcTo(x, y, x + w, y, r); ctx.closePath(); }
   // a group title drawn at screen size (like the lobe titles): a name in the group colour and a count line, anchored at a world point.
   // pitchPx is the room the group has on screen; names fade out once the groups are too tight to hold them
+  // coil layout: the apparatus beneath the toroid, the toroid, the channels (glow and core, flickering), the discharges, the streamer titles
+  function drawCoil(titleVis, tl) {
+    const sw = px => px / k, now = performance.now(), frame = reduceMotion ? 0 : Math.floor(now / 90);
+    const flick = (i, j) => reduceMotion ? 1 : 0.72 + 0.56 * hash01(i * 31 + j, frame);
+    const hubL = lobes.find(selfLobe), base = hubL ? hubL.color : '#a7b2cc', ry = coilR * CL.ry;
+    // the secondary winding: a cylinder of turns beneath the toroid; the primary: three wide flat turns at its foot; a base plate
+    const w2 = coilR * 0.5, y0 = ry + 14, hgt = coilR * CL.body;
+    ctx.fillStyle = rgba(base, 0.035); ctx.fillRect(-w2, y0 + 12, 2 * w2, hgt - 60);
+    ctx.lineWidth = sw(1);
+    for (let i = 0; i < CL.turns; i++) { const y = y0 + 12 + (hgt - 60) * (i / (CL.turns - 1)); ctx.beginPath(); ctx.ellipse(0, y, w2, w2 * 0.16, 0, 0, Math.PI * 2); ctx.strokeStyle = rgba(base, i % 2 ? 0.17 : 0.1); ctx.stroke(); }
+    ctx.beginPath(); ctx.moveTo(-w2, y0 + 12); ctx.lineTo(-w2, y0 + hgt - 48); ctx.moveTo(w2, y0 + 12); ctx.lineTo(w2, y0 + hgt - 48); ctx.strokeStyle = rgba(base, 0.22); ctx.stroke();
+    ctx.lineWidth = sw(2.2);
+    [0.74, 0.86, 0.98].forEach((f, i) => { ctx.beginPath(); ctx.ellipse(0, y0 + hgt - 40 + i * 11, coilR * f, coilR * f * 0.2, 0, 0, Math.PI * 2); ctx.strokeStyle = rgba('#a7b2cc', 0.2); ctx.stroke(); });
+    ctx.beginPath(); ctx.ellipse(0, y0 + hgt, coilR * 1.1, coilR * 0.22, 0, 0, Math.PI * 2); ctx.fillStyle = rgba('#a7b2cc', 0.05); ctx.fill(); ctx.lineWidth = sw(1); ctx.strokeStyle = rgba('#a7b2cc', 0.18); ctx.stroke();
+    // the stem from the winding up into the toroid
+    ctx.beginPath(); ctx.moveTo(0, y0 + 12); ctx.lineTo(0, ry * 0.4); ctx.lineWidth = sw(3); ctx.strokeStyle = rgba(base, 0.25); ctx.stroke();
+    // the toroid: a ring seen from a little above, its hole dark, its upper rim lit by the discharge
+    ctx.beginPath(); ctx.ellipse(0, 0, coilR, ry, 0, 0, Math.PI * 2); ctx.fillStyle = rgba(base, 0.08); ctx.fill(); ctx.lineWidth = sw(2.4); ctx.strokeStyle = rgba(base, 0.55 * flick(7, 7)); ctx.stroke();
+    ctx.lineWidth = sw(9); ctx.strokeStyle = rgba(base, 0.1 * flick(7, 8)); ctx.stroke();
+    ctx.beginPath(); ctx.ellipse(0, 0, coilR * 0.52, ry * 0.52, 0, 0, Math.PI * 2); ctx.fillStyle = rgba('#06080f', 0.45); ctx.fill(); ctx.lineWidth = sw(1.2); ctx.strokeStyle = rgba(base, 0.35); ctx.stroke();
+    // the streamers
+    ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+    streamers.forEach(s => {
+      if (!s.on) return;
+      const ox = s.ox || 0, oy = s.oy || 0, si = streamerIdx[s.id] + 1;
+      ctx.save(); ctx.translate(ox, oy);
+      const hub = s.hubOn ? [s.hubOn.gx - ox, s.hubOn.gy - oy] : null;
+      // the trunk: rim → hub → fork point (a brain on the network screen); for a plain lobe the rim is the fork point itself
+      const trunk = [s.root, ...(hub ? [hub] : []), s.fork].filter((q, i, arr) => !i || q[0] !== arr[i - 1][0] || q[1] !== arr[i - 1][1]);
+      const polys = [{ pts: trunk, col: s.color, j: 0 }, ...s.chains.map((c, j) => ({ pts: c.pts, col: c.l ? c.l.color : s.color, j: j + 1 }))];   // a chain's first point is where it leaves: the fork point, or its trunk's tip
+      polys.forEach(({ pts, col, j }) => {
+        if (pts.length < 2) return;
+        ctx.beginPath(); pts.forEach((q, i) => (i ? ctx.lineTo(q[0], q[1]) : ctx.moveTo(q[0], q[1])));
+        ctx.lineWidth = sw(8); ctx.strokeStyle = rgba(col, 0.075 * flick(si, j)); ctx.stroke();
+        ctx.lineWidth = sw(1.4); ctx.strokeStyle = rgba(col, 0.6 * flick(si, j + 40)); ctx.stroke();
+        ctx.lineWidth = sw(0.6); ctx.strokeStyle = rgba('#ffffff', 0.25 * flick(si, j + 80)); ctx.stroke();
+      });
+      // twigs: a short dead-end spark off most kinks, on the ladder side, gone once the ladders explode
+      if (explodeF < 0.9) {
+        ctx.lineWidth = sw(0.8);
+        s.chains.forEach((c, j) => c.ps.forEach((p, i) => {
+          const z = hash01(si * 97 + j, i + 500); if (z < 0.35) return;
+          const L1 = 10 + z * 18, L2 = 6 + z * 8, a1 = p.gh - s.side * (0.9 + z * 0.8), a2 = a1 + (z - 0.5) * 1.6;
+          const x1 = p.gx - ox + Math.cos(a1) * L1, y1 = p.gy - oy + Math.sin(a1) * L1;
+          ctx.beginPath(); ctx.moveTo(p.gx - ox, p.gy - oy); ctx.lineTo(x1, y1); ctx.lineTo(x1 + Math.cos(a2) * L2, y1 + Math.sin(a2) * L2);
+          ctx.strokeStyle = rgba(c.l ? c.l.color : s.color, 0.35 * (1 - explodeF) * flick(si + j, i + 120)); ctx.stroke();
+        }));
+      }
+      ctx.restore();
+    });
+    // discharges: a bolt leaves the rim every so often and runs out along one channel to its tip
+    if (!reduceMotion) {
+      const on = streamers.filter(s => s.on && s.chains.length);
+      if (on.length && now - lastDischarge > 380 && coilPulses.length < 14) {
+        lastDischarge = now; const s = on[Math.floor(Math.random() * on.length)], c = s.chains[Math.floor(Math.random() * s.chains.length)];
+        const path = [s.root, ...(s.hubOn ? [[s.hubOn.gx - (s.ox || 0), s.hubOn.gy - (s.oy || 0)]] : []), ...(s.fork !== s.root ? [s.fork] : []), ...(c.from ? c.from.pts.slice(1) : []), ...c.pts.slice(1)];
+        const cum = [0]; for (let i = 1; i < path.length; i++) cum.push(cum[i - 1] + Math.hypot(path[i][0] - path[i - 1][0], path[i][1] - path[i - 1][1]));
+        if (cum[cum.length - 1] > 1) coilPulses.push({ s, c, path, cum, L: cum[cum.length - 1], t: 0, speed: 0.012 + Math.random() * 0.008, seed: Math.floor(Math.random() * 1e6) });
+      }
+      const at = (q, d) => { let i = 1; while (i < q.cum.length - 1 && q.cum[i] < d) i++; const f = (d - q.cum[i - 1]) / ((q.cum[i] - q.cum[i - 1]) || 1); return [q.path[i - 1][0] + (q.path[i][0] - q.path[i - 1][0]) * f, q.path[i - 1][1] + (q.path[i][1] - q.path[i - 1][1]) * f]; };
+      for (let i = coilPulses.length - 1; i >= 0; i--) {
+        const q = coilPulses[i]; q.t += q.speed; if (q.t >= 1) { coilPulses.splice(i, 1); continue; }
+        const col = q.c.l ? q.c.l.color : q.s.color, a = Math.sin(q.t * Math.PI) * 0.9, ox = q.s.ox || 0, oy = q.s.oy || 0;
+        const [x1, y1] = at(q, q.t * q.L), [x0, y0] = at(q, Math.max(0, q.t - 0.07) * q.L);
+        ctx.beginPath(); bolt(x0 + ox, y0 + oy, x1 + ox, y1 + oy, q.seed, sw(3.5), 5);
+        ctx.lineWidth = sw(6); ctx.strokeStyle = rgba(col, 0.3 * a); ctx.stroke();
+        ctx.lineWidth = sw(1.6); ctx.strokeStyle = rgba('#ffffff', a); ctx.stroke();
+        ctx.fillStyle = rgba('#ffffff', a); ctx.beginPath(); ctx.arc(x1 + ox, y1 + oy, sw(2), 0, Math.PI * 2); ctx.fill();
+      }
+    }
+    // titles: a streamer's name beyond the tip of its longest channel; on the network screen the brain's name at its fork and each lobe's at its channel's tip
+    const v = titleVis * Math.max(tl, 0.55);
+    if (v > 0.02) streamers.forEach(s => {
+      if (!s.on) return;
+      const ox = s.ox || 0, oy = s.oy || 0;
+      const tipOf = c => [c.x + ox + Math.cos(c.head) * 28, c.y + oy + Math.sin(c.head) * 28];
+      if (s.lobesOn.length <= 1) { const c = s.tip; const [x, y] = c ? tipOf(c) : [s.fork[0] + ox, s.fork[1] + oy - 30]; drawGroupTitle(s, x, y, 160, v, { align: c && Math.cos(c.head) < -0.2 ? 'right' : c && Math.cos(c.head) > 0.2 ? 'left' : 'center' }); }
+      else {
+        const [fx, fy] = s.fork; drawGroupTitle(s, fx + ox - Math.cos(s.head) * 10, fy + oy - Math.sin(s.head) * 10 + 22, 160, v, { align: 'center' });
+        const seen = new Set();
+        s.chains.forEach(c => { if (!c.l || seen.has(c.l.id)) return; const best = s.chains.filter(x => x.l === c.l).reduce((m, x) => (x.len > m.len ? x : m)); seen.add(c.l.id); const [x, y] = tipOf(best); drawGroupTitle({ name: c.l.name, color: c.l.color, loci: best.ps }, x, y, 140, v * 0.85 * clamp01((k - 0.28) / 0.3), { align: Math.cos(best.head) < -0.2 ? 'right' : Math.cos(best.head) > 0.2 ? 'left' : 'center', count: false }); });
+      }
+    });
+    ctx.lineCap = 'butt'; ctx.lineJoin = 'miter';   // canvas state: the round caps must not leak into later strokes or frames
+  }
   function drawGroupTitle(g, wx, wy, pitchPx, v, opts = {}) {
     const mobile = window.innerWidth <= 900, count = opts.count !== false;
     const fs = Math.max(9.5, Math.min(mobile ? 11 : 14, 10 + Math.sqrt(g.loci.length) * 1.2)), fs2 = Math.max(9, fs - 3);
@@ -929,7 +1120,7 @@
 
     const lobeVis = clamp01((1.05 - k) / 0.45);           // lobe halos, visible when zoomed out
     const synVis = forceExplode ? 1 : clamp01((k - 1.25) / 0.45); // synapses fade in
-    const labelVis = table() ? clamp01((k - 0.42) / 0.2) : clamp01((k - 0.62) / 0.4);   // at the table the radial labels are the read, so they are up at the fitted zoom
+    const labelVis = radial() ? clamp01((k - 0.42) / 0.2) : clamp01((k - 0.62) / 0.4);   // at the table the radial labels are the read, so they are up at the fitted zoom
     const synLabelVisAll = clamp01((k - 3.4) / 0.6);
     const synLabelVisFocus = clamp01((k - 1.6) / 0.4);
     const srcLabelVis = clamp01((k - 3.2) / 0.8);
@@ -947,7 +1138,7 @@
     const inView = (x, y) => x > vx0 && x < vx1 && y > vy0 && y < vy1;
 
     // maps: the karyogram, the cells or the tree (bars, membranes, plates, titles) stand in for the lobe halos
-    if (genome()) drawKaryogram(clamp01((1.7 - k) / 0.6), labelF); else if (cell()) drawCells(clamp01((1.7 - k) / 0.6), labelF); else if (tree()) drawTree(clamp01((1.7 - k) / 0.6), labelF); else if (table()) drawTable(clamp01((1.7 - k) / 0.6), labelF);
+    if (genome()) drawKaryogram(clamp01((1.7 - k) / 0.6), labelF); else if (cell()) drawCells(clamp01((1.7 - k) / 0.6), labelF); else if (tree()) drawTree(clamp01((1.7 - k) / 0.6), labelF); else if (table()) drawTable(clamp01((1.7 - k) / 0.6), labelF); else if (coil()) drawCoil(clamp01((1.7 - k) / 0.6), labelF);
     // lobe halos
     if (lobeVis > 0 && !mapped()) {
       ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic';
@@ -1047,7 +1238,7 @@
       const da = Math.min(depthA(l.source), depthA(l.target)); if (da < 0.03) return;
       if (!inView(l.source.x, l.source.y) && !inView(l.target.x, l.target.y)) return;
       const inFocus = focusSet && focusSet.has(l.source) && focusSet.has(l.target) && (l.source === focus || l.target === focus);
-      const base = (0.16 + Math.min(l.w, 6) * 0.045) * (mapped() && !sameGroup(l.source, l.target) ? (table() ? 0.7 : 0.45) : 1);   // table chords soften only a little so the ring still reads   // maps: arches between groups stay faint so the groups read
+      const base = (0.16 + Math.min(l.w, 6) * 0.045) * (mapped() && !sameGroup(l.source, l.target) ? (radial() ? 0.7 : 0.45) : 1);   // table chords soften only a little so the ring still reads   // maps: arches between groups stay faint so the groups read
       const a = (focusSet ? (inFocus ? 0.85 : 0.05) : base) * da;
       const col = l.source.lobe === l.target.lobe ? lobeColor(l.source) : '#b9c4e0';
       ctx.strokeStyle = rgba(col, a);
@@ -1072,7 +1263,10 @@
         } else {
           ctx.strokeStyle = rgba('#8ea2cc', (related ? 0.22 : 0.03) * v); ctx.lineWidth = sw(0.6); ctx.setLineDash([sw(1.5), sw(3)]);
         }
-        ctx.beginPath(); ctx.moveTo(l.source.x, l.source.y); ctx.lineTo(l.target.x, l.target.y); ctx.stroke();
+        const sp = sparkAny && l.kind !== 'sr' && sparkOf(pageById[l.source.page] || l.source);   // a synapse (st, sx) sparks with its page
+        ctx.beginPath();
+        if (sp) bolt(l.source.x, l.source.y, l.target.x, l.target.y, linkSeed(l), Math.min(5, sw(1.2) + Math.hypot(l.target.x - l.source.x, l.target.y - l.source.y) * 0.025), l.kind === 'st' ? 4 : 6); else { ctx.moveTo(l.source.x, l.source.y); ctx.lineTo(l.target.x, l.target.y); }
+        ctx.stroke();
       });
       ctx.setLineDash([]);
     }
@@ -1080,6 +1274,12 @@
     // pulses
     if (!reduceMotion) {
       if (now - lastPulse > 260) { lastPulse = now; const cand = activeLinks.filter(l => l.kind === 'pp' && depthA(l.source) > 0.97 && depthA(l.target) > 0.97); spawnPulse(cand[Math.floor(Math.random() * cand.length)]); }
+      // sparking neurons discharge more often, and once their synapses are out, the synapses that reach other neurons fire too
+      if (sparkAny && now - lastSpark > 150) {
+        lastSpark = now; const out = synVis > 0.02 && explodeF > 0.5;
+        const cand = activeLinks.filter(l => (l.kind === 'pp' && (sparkOf(l.source) || sparkOf(l.target)) && depthA(l.source) > 0.97 && depthA(l.target) > 0.97) || (out && l.kind === 'sx' && sparkOf(pageById[l.source.page])));
+        spawnPulse(cand[Math.floor(Math.random() * cand.length)], false, true);
+      }
       for (let i = pulses.length - 1; i >= 0; i--) {
         const p = pulses[i]; p.t += p.speed; if (p.t >= 1) { pulses.splice(i, 1); continue; }
         const s = p.dir > 0 ? p.l.source : p.l.target, e = p.dir > 0 ? p.l.target : p.l.source;
@@ -1087,6 +1287,14 @@
         const col = s.lobe === e.lobe ? lobeColor(s) : '#ffffff';
         const a = Math.sin(p.t * Math.PI) * Math.min(depthA(s), depthA(e));
         if (a < 0.02) continue;
+        if (p.spark) {   // a bolt: a short lightning stroke behind the head, a white core in a coloured glow
+          const [x0, y0] = linkPoint(p.l, s, e, Math.max(0, p.t - 0.09)), g = focusSet ? 0.5 : 1;
+          ctx.save(); ctx.lineCap = 'round'; ctx.lineJoin = 'round'; ctx.beginPath(); bolt(x0, y0, x, y, p.seed, sw(3.2), 5);
+          ctx.lineWidth = sw(6); ctx.strokeStyle = rgba(s.kind === 'syn' ? lobeColor(pageById[s.page]) : lobeColor(s), 0.3 * a * g); ctx.stroke();
+          ctx.lineWidth = sw(1.5); ctx.strokeStyle = rgba('#ffffff', 0.95 * a * g); ctx.stroke();
+          ctx.fillStyle = rgba('#ffffff', 0.95 * a * g); ctx.beginPath(); ctx.arc(x, y, sw(1.9), 0, Math.PI * 2); ctx.fill(); ctx.restore();
+          continue;
+        }
         ctx.fillStyle = rgba(col, 0.9 * a * (focusSet ? 0.5 : 1)); ctx.beginPath(); ctx.arc(x, y, sw(2.2), 0, Math.PI * 2); ctx.fill();
         ctx.fillStyle = rgba(col, 0.25 * a); ctx.beginPath(); ctx.arc(x, y, sw(6), 0, Math.PI * 2); ctx.fill();
       }
@@ -1141,7 +1349,7 @@
           let ang = Math.atan2(n.y - p.y, n.x - p.x), flip = Math.cos(ang) < 0;
           const onLadder = genome() || tree();
           if (onLadder) { flip = ladderSide(p) < 0; ang = flip ? -1.0 : 1.0; }
-          else if (table()) { ang += 0.9; flip = Math.cos(ang) < 0; }   // table layout: hang off the radial ladder at a slant, kept upright   // down-right for a right-hand ladder, down-left for a left-hand one
+          else if (radial()) { ang += 0.9; flip = Math.cos(ang) < 0; }   // table layout: hang off the radial ladder at a slant, kept upright   // down-right for a right-hand ladder, down-left for a left-hand one
           ctx.save(); ctx.translate(n.x, n.y); ctx.rotate(flip && !onLadder ? ang + Math.PI : ang);
           ctx.font = `500 ${sw(10.5)}px 'Satoshi', sans-serif`; ctx.textBaseline = 'middle'; ctx.textAlign = flip ? 'right' : 'left';
           ctx.fillStyle = rgba('#e9eefb', 0.92 * lv * v * explodeF);
@@ -1195,7 +1403,7 @@ captionPaint.push(() => {ctx.shadowColor="#06080f";ctx.shadowBlur=4;
         const fs = isSelf(n) ? 15 : isChild(n) ? 10.5 : 12;
         ctx.font = `${isSelf(n) ? 600 : 500} ${sw(fs)}px 'Satoshi', sans-serif`;
         // ladder layouts: labels sit beside the band like gene annotations (on the ladder's side) and lift above the synapse ladder
-        if (table() && n.gux !== undefined) {
+        if (radial() && n.gux !== undefined && !(coil() && n.gflat)) {
           // table layout: labels read along the radius like place cards. Outward for a plain chair (radial labels diverge there, so neighbours
           // stay apart), inward beside the ladder for a chair once its sub-neurons are standing behind it (outward like a plain chair until then, so a long label never crosses the table), outward beside its own ladder for a sub-neuron.
           const kidsOn = !isChild(n) && n.children.some(pageOn) && depthF > 0.5, dir = kidsOn ? -1 : 1, ux = n.gux * dir, uy = n.guy * dir;
@@ -1361,6 +1569,7 @@ ctx.shadowBlur=0;});
     else if (e.key === 'k' || e.key === 'K') toggleLayout('cell');
     else if (e.key === 'f' || e.key === 'F') toggleLayout('tree');
     else if (e.key === 't' || e.key === 'T') toggleLayout('table');
+    else if (e.key === 'z' || e.key === 'Z') toggleLayout('coil');   // C belongs to the NNCCG Charts drawer
   });
 
   function select(n, opts = {}) {
@@ -1515,6 +1724,7 @@ ctx.shadowBlur=0;});
     genome: svg('<path d="M7 3.5c-1.6 0-2.5 1-2.5 2.5v3.6c0 1 .7 1.6 1.4 2.1-.7.5-1.4 1.1-1.4 2.1V18c0 1.5.9 2.5 2.5 2.5s2.5-1 2.5-2.5v-4.2c0-1-.7-1.6-1.4-2.1.7-.5 1.4-1.1 1.4-2.1V6c0-1.5-.9-2.5-2.5-2.5z"/><path d="M17 3.5c-1.6 0-2.5 1-2.5 2.5v5.2c0 1 .7 1.6 1.4 2.1-.7.5-1.4 1.1-1.4 2.1V18c0 1.5.9 2.5 2.5 2.5s2.5-1 2.5-2.5v-2.6c0-1-.7-1.6-1.4-2.1.7-.5 1.4-1.1 1.4-2.1V6c0-1.5-.9-2.5-2.5-2.5z"/><path d="M4.5 7.5h5M4.5 16h5M14.5 8.5h5M14.5 17h5"/>'),
     cell: svg('<circle cx="12" cy="12" r="9.5"/><circle cx="12" cy="12" r="5"/><circle cx="12" cy="12" r="1.4" fill="currentColor" stroke="none"/><path d="M12 7v5M12 12l4.3 2.5M12 12l-4.3 2.5"/>'),
     tree: svg('<circle cx="5" cy="12" r="2.2"/><circle cx="19" cy="5.5" r="2.2"/><circle cx="19" cy="12" r="2.2"/><circle cx="19" cy="18.5" r="2.2"/><path d="M7.2 12h4.8M12 12V5.5h4.8M12 12h4.8M12 12v6.5h4.8"/>'),
+    coil: svg('<ellipse cx="12" cy="15" rx="7" ry="2.6"/><path d="M12 17.6v3M8.5 20.6h7M12 12.4l-2.2-3.4 1.6-1.2L9.6 4.2M12 12.4l2.4-3 -1.2-1.4L15.4 4M12 12.4V7.5l1-1.6"/>'),
     table: svg('<circle cx="12" cy="12" r="8.5"/><circle cx="12" cy="12" r="4" opacity="0.45"/><path d="M12 3.5v2.2M20.5 12h-2.2M12 20.5v-2.2M3.5 12h2.2M18 6l-1.6 1.6M18 18l-1.6-1.6M6 18l1.6-1.6M6 6l1.6 1.6"/>'),
     labels: svg('<path d="M3 12V5a2 2 0 0 1 2-2h7l9 9-9 9-9-9z"/><circle cx="7.5" cy="7.5" r="1.2" fill="currentColor" stroke="none"/>'),
     save: svg('<path d="M5 3.5h11l3.5 3.5v12a1.5 1.5 0 0 1-1.5 1.5H5A1.5 1.5 0 0 1 3.5 19V5A1.5 1.5 0 0 1 5 3.5z"/><path d="M7.5 3.5v5h8v-5"/><rect x="7" y="13" width="10" height="7.5" rx="1"/>'),
@@ -1577,6 +1787,7 @@ ctx.shadowBlur=0;});
     ['cell', 'cell-toggle', 'Karyocyte', 'one cell: lobes as territories in the nucleus, the hub as nucleolus', 'K'],
     ['tree', 'tree-toggle', 'Family tree', 'the hub as ancestor, each lobe a branch, neurons the generations', 'F'],
     ['table', 'table-toggle', 'Table', 'a round table with no head: lobes as seats, neurons as chairs', 'T'],
+    ['coil', 'coil-toggle', 'Coil', 'a Tesla coil in discharge: the hub in the toroid, lobes as streamers, neurons as kinks', 'Z'],
   ];
   const layFly = flyout('layout-flyout', 'Layouts', 'menu');
   layFly.innerHTML = `<div class="fly-head">Layouts</div>` + LAYOUT_ROWS.map(([l, id, name, what, key]) => `<button class="fly-row lay" id="${id}" data-layout="${l}" role="menuitemradio" aria-checked="false" aria-pressed="false">${ICON[l]}<span class="fly-text"><b>${name}</b><small>${what}</small></span>${key ? `<kbd>${key}</kbd>` : ''}</button>`).join('');
@@ -1585,7 +1796,7 @@ ctx.shadowBlur=0;});
   // labels toggle: a tool button and a switch in the lobes panel drive the same state
   const switches = document.querySelector('#lobes .switches');
   if (switches) {
-    [['layout-table', 'Table layout'], ['layout-tree', 'Family tree layout'], ['layout-cell', 'Karyocyte layout'], ['layout-genome', 'Genome layout']].forEach(([id, name]) => { const g = document.createElement('label'); g.className = 'switch'; g.innerHTML = `<input type="checkbox" id="${id}"><span>${name}</span>`; switches.prepend(g); });
+    [['layout-coil', 'Coil layout'], ['layout-table', 'Table layout'], ['layout-tree', 'Family tree layout'], ['layout-cell', 'Karyocyte layout'], ['layout-genome', 'Genome layout']].forEach(([id, name]) => { const g = document.createElement('label'); g.className = 'switch'; g.innerHTML = `<input type="checkbox" id="${id}"><span>${name}</span>`; switches.prepend(g); });
     const l = document.createElement('label'); l.className = 'switch'; l.innerHTML = '<input type="checkbox" id="labels" checked><span>Labels</span>'; switches.prepend(l);
   }
   // layout switch: a tool button, a switch in the lobes panel and a key drive the same state per map; the hash carries it so a link can open a map
@@ -1594,13 +1805,14 @@ ctx.shadowBlur=0;});
     cell: { btn: 'cell-toggle', sw: 'layout-cell', key: 'K', flash: 'karyocyte layout · the brain is one cell: lobes are territories in the nucleus, the hub its nucleolus', noun: 'cells', one: 'cell', unit: 'neuron', hint: 'karyocyte layout · the nucleus holds the lobes as territories, the hub is the nucleolus' },
     tree: { btn: 'tree-toggle', sw: 'layout-tree', key: 'F', flash: 'family tree layout · the hub is the ancestor, each lobe a branch, neurons and sub-neurons the generations', noun: 'branches', one: 'branch', unit: 'neuron', hint: 'family tree layout · the hub is the ancestor, each plate a lobe, each row a neuron' },
     table: { btn: 'table-toggle', sw: 'layout-table', key: 'T', flash: 'table layout · a round table with no head · seats are lobes, chairs are neurons, synapses lie on the table', noun: 'seats', one: 'seat', unit: 'chair', hint: 'table layout · each seat is a lobe, each chair a neuron, nobody sits at the head' },
+    coil: { btn: 'coil-toggle', sw: 'layout-coil', key: 'Z', flash: 'coil layout · a Tesla coil in discharge · the hub stands in the toroid, every lobe is a streamer, every neuron a kink of the bolt', noun: 'streamers', one: 'streamer', unit: 'kink', hint: 'coil layout · the hub stands in the toroid, each streamer is a lobe, each kink a neuron' },
   };
   // the rail button, the flyout rows and the lobes-panel switches all show the same layout
   function syncLayoutUI() {
     Object.entries(LAYOUT_UI).forEach(([id, u]) => { const on = layout === id, b = document.getElementById(u.btn); if (b) { b.classList.toggle('on', on); b.setAttribute('aria-pressed', String(on)); } const c = document.getElementById(u.sw); if (c) c.checked = on; });
     const nb = document.getElementById('neural-toggle'); if (nb) { nb.classList.toggle('on', !mapped()); nb.setAttribute('aria-pressed', String(!mapped())); }
     layFly.querySelectorAll('.lay').forEach(b => b.setAttribute('aria-checked', b.getAttribute('aria-pressed')));
-    layoutMenuBtn.innerHTML = ICON[layout]; layoutMenuBtn.classList.toggle('on', mapped()); layoutMenuBtn.title = `Layouts: ${mapped() ? LAYOUT_UI[layout].one.replace(/^\w/, c => c.toUpperCase()) + ' map' : 'neural'} now · G, K, F or T jump to a map`;
+    layoutMenuBtn.innerHTML = ICON[layout]; layoutMenuBtn.classList.toggle('on', mapped()); layoutMenuBtn.title = `Layouts: ${mapped() ? LAYOUT_UI[layout].one.replace(/^\w/, c => c.toUpperCase()) + ' map' : 'neural'} now · G, K, F, T or Z jump to a map`;
   }
   let layoutFitTimer;
   function setLayout(l, opts = {}) {
@@ -1813,7 +2025,7 @@ ctx.shadowBlur=0;});
     if (pinned && lvl === 'Lobes') { hint.textContent = `${plural(pinned, 'neuron')} placed by hand · R releases them`; return; }
     const u = mapped() ? LAYOUT_UI[layout] : null;
     if (u && mapMoved() && lvl === 'Lobes') { hint.textContent = `${u.noun} moved by hand · drag a ${u.unit} to move its whole ${u.one} · R resets the map`; return; }
-    if (lvl === 'Lobes') { hint.textContent = u ? `${u.hint} · drag a ${u.unit} to move its ${u.one} · ${u.key} returns to the neural layout` : mode === 'select' ? 'scroll to zoom · drag to select · mouse3 or Space to pan · drag a neuron to move it · G, K, F or T for the genome, karyocyte, family tree or table layout' : 'scroll to zoom · drag to pan · click a neuron · V for select mode · G, K, F or T for the genome, karyocyte, family tree or table layout'; return; }
+    if (lvl === 'Lobes') { hint.textContent = u ? `${u.hint} · drag a ${u.unit} to move its ${u.one} · ${u.key} returns to the neural layout` : mode === 'select' ? 'scroll to zoom · drag to select · mouse3 or Space to pan · drag a neuron to move it · G, K, F, T or Z for the genome, karyocyte, family tree, table or coil layout' : 'scroll to zoom · drag to pan · click a neuron · V for select mode · G, K, F, T or Z for the genome, karyocyte, family tree, table or coil layout'; return; }
     hint.textContent = lvl === 'Lobes' ? 'scroll to zoom · drag to pan · click a neuron' : lvl === 'Neurons' ? (hasSubs ? 'keep zooming: sub-neurons unfold at 0.85×, synapses at 1.5×' : 'keep zooming: synapses explode at 1.5×') : lvl === 'Sub-neurons' ? 'small satellites are sub-neurons · zoom past 1.5× to explode synapses' : 'dots are synapses · diamonds are sources · dashed lines fire across neurons';
   }
   function updateStats() {
@@ -1882,5 +2094,5 @@ ctx.shadowBlur=0;});
     engine: 'canonical',
     lobes: () => lobes.map(l => ({ id: l.id, name: l.name, color: l.color, on: !!lobeOn[l.id] }))   // read-only lobe state for overlays (NNCCG)
   });
-  window.MINDBLOWN_QA = { screenOf: id => { const n = pageById[id]; return n ? toScreen(n.x, n.y) : null; }, selection: () => [...multi].map(n => n.id), pinned: () => pages.filter(n => n.pinned).map(n => n.id), mode: () => mode, labels: () => labelsOn, layout: () => layout, setLayout: l => setLayout(l, { noFit: true }), chromosomes: () => chromos.filter(c => c.on).map(c => ({ id: c.id, x: c.x, top: c.top, bot: c.bot, loci: c.loci.map(p => p.id), hub: c.hubOn ? c.hubOn.id : null })), groups: () => groupsNow().filter(g => g.on).map(g => ({ id: g.id, loci: g.loci.map(p => p.id), hub: g.hubOn ? g.hubOn.id : null, ox: g.ox || 0, oy: g.oy || 0 })), cells: () => cells.filter(c => c.on).map(c => ({ id: c.id, cx: c.cx, cy: c.cy, Rn: c.Rn, Rc: c.Rc })), seats: () => seats.filter(c => c.on).map(c => ({ id: c.id, a0: c.a0, a1: c.a1, loci: c.loci.map(p => p.id) })), tableR: () => tableR, trees: () => trees.filter(t => t.on).map(t => ({ id: t.id, x: t.x, y: t.y, w: t.w, h: t.h })), sealed: () => syns.filter(sealed).map(s => s.id), solve: (id, text) => !!synById[id] && solve(synById[id], text), screenshot, captureLayout, applyLayout, layouts: readLayouts, saveLayout, flyout: () => (openFly ? openFly.f.id : null) };
+  window.MINDBLOWN_QA = { screenOf: id => { const n = pageById[id]; return n ? toScreen(n.x, n.y) : null; }, selection: () => [...multi].map(n => n.id), pinned: () => pages.filter(n => n.pinned).map(n => n.id), mode: () => mode, labels: () => labelsOn, layout: () => layout, setLayout: l => setLayout(l, { noFit: true }), chromosomes: () => chromos.filter(c => c.on).map(c => ({ id: c.id, x: c.x, top: c.top, bot: c.bot, loci: c.loci.map(p => p.id), hub: c.hubOn ? c.hubOn.id : null })), groups: () => groupsNow().filter(g => g.on).map(g => ({ id: g.id, loci: g.loci.map(p => p.id), hub: g.hubOn ? g.hubOn.id : null, ox: g.ox || 0, oy: g.oy || 0 })), cells: () => cells.filter(c => c.on).map(c => ({ id: c.id, cx: c.cx, cy: c.cy, Rn: c.Rn, Rc: c.Rc })), seats: () => seats.filter(c => c.on).map(c => ({ id: c.id, a0: c.a0, a1: c.a1, loci: c.loci.map(p => p.id) })), tableR: () => tableR, streamers: () => streamers.filter(c => c.on).map(c => ({ id: c.id, name: c.name, on: c.on, n: c.loci.length, hub: c.hubOn ? c.hubOn.id : null, root: c.root, fork: c.fork, chains: c.chains.map(x => x.pts.length - 1), ox: c.ox || 0, oy: c.oy || 0 })), coilR: () => coilR, sparks: () => pulses.filter(p => p.spark).length, trees: () => trees.filter(t => t.on).map(t => ({ id: t.id, x: t.x, y: t.y, w: t.w, h: t.h })), sealed: () => syns.filter(sealed).map(s => s.id), solve: (id, text) => !!synById[id] && solve(synById[id], text), screenshot, captureLayout, applyLayout, layouts: readLayouts, saveLayout, flyout: () => (openFly ? openFly.f.id : null) };
 })();
