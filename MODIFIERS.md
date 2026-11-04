@@ -8,7 +8,7 @@ Open Lobes and choose **Place Modifier Brain**. Select a neuron and place a cont
 - **Dependencies:** Explicit directed connections authored in the modifier panel. Ordinary knowledge/reference links are never treated as causal.
 - **Propagation:** Each target receives the sum of modifier deviations from 1. Downstream targets receive weighted deviations through a directed acyclic graph. Values clamp at each node; the results panel shows direct and incoming contributions.
 - **Conflicts:** Duplicate links, cycles, invalid weights and unknown targets are rejected before changing the scenario. Negative influence and cancellation are supported.
-- **Data boundary:** The factual dataset is never modified. No backend writes or persistent storage. Reload resets the scenario.
+- **Data boundary:** The factual dataset is never modified. No backend writes. Reload resets the scenario unless it was saved in a layout: a saved layout (browser storage or a `.mindblown-layout.json` file) carries the controllers and modeled connections, and applying it restores them after validation.
 
 ## Controls and limits
 

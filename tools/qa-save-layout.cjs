@@ -87,13 +87,20 @@ const fs = require('fs');
   await p.click('#save-layout'); await p.waitForTimeout(250);
   const [dl] = await Promise.all([p.waitForEvent('download'), p.click('#layout-download')]);
   check(/\.mindblown-layout\.json$/.test(dl.suggestedFilename()), 'download fallback names a .mindblown-layout.json file');
+  // 7b. desktop: an open details panel never covers the rail (the rail steps to the panel's left)
+  await p.keyboard.press('Escape');
+  const openId = await p.evaluate(() => window.MINDBLOWN.pages.find(x => !x.parent && x.lobe !== 'self').id);
+  await p.evaluate(id => window.MINDBLOWN_RENDERER.focus(id), openId); await p.waitForTimeout(1200);
+  const covered = await p.evaluate(() => [...document.querySelectorAll('#rail button')].filter(b => b.offsetParent).filter(b => { const r = b.getBoundingClientRect(); const hit = document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2); return !hit || !b.contains(hit) && hit !== b; }).map(b => b.id || b.title));
+  check(!(await p.$eval('#panel', e => e.hidden)) && covered.length === 0, `with a neuron open every rail button stays clickable (covered: ${JSON.stringify(covered)})`);
   await p.close();
   // 8. phone: the rail keeps Brains, File and Zoom; saved layouts open as a bottom sheet
   const saved = await ctx.storageState(); p = await phone.newPage(); watch(p);
   await p.goto(url); await p.evaluate(o => { o.forEach(x => (x.localStorage || []).forEach(kv => localStorage.setItem(kv.name, kv.value))); }, saved.origins); await p.reload();
   await p.goto(url); await p.waitForTimeout(2200);
   const vis = await p.evaluate(() => [...document.querySelectorAll('#rail .zoom-ctl')].filter(g => g.offsetParent !== null).map(g => g.id));
-  check(JSON.stringify(vis) === JSON.stringify([...(hasBrains ? ['brain-tools'] : []), 'file-tools', 'zoom-ctl']), `phone rail shows ${hasBrains ? 'Brains, ' : ''}File, Zoom (got ${vis})`);
+  const hasCharts = await p.$('#rail #view-tools #nnccg-open') !== null;   // NNCCG keeps only its Charts button in the phone View group
+  check(JSON.stringify(vis) === JSON.stringify([...(hasBrains ? ['brain-tools'] : []), ...(hasCharts ? ['view-tools'] : []), 'file-tools', 'zoom-ctl']), `phone rail shows ${hasBrains ? 'Brains, ' : ''}${hasCharts ? 'Charts, ' : ''}File, Zoom (got ${vis})`);
   await p.screenshot({ path: 'qa/save_layout_mobile.png' });
   await p.tap('#save-layout').catch(() => p.click('#save-layout')); await p.waitForTimeout(300);
   const sheet = await p.$eval('#layouts-flyout', e => { const r = e.getBoundingClientRect(); return { open: !e.hidden, l: Math.round(r.left), r: Math.round(innerWidth - r.right), b: Math.round(innerHeight - r.bottom), n: e.querySelectorAll('.apply').length }; });
