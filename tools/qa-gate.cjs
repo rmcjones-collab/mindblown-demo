@@ -24,6 +24,7 @@ if (!url) { console.error('usage: node tools/qa-gate.cjs <brain-url>'); process.
     const fe = await page.$('#explorer-frame'); const bb = await fe.boundingBox(); off = [bb.x, bb.y];
     p = await fe.contentFrame(); p.mouse = { click: (x, y) => page.mouse.click(x + off[0], y + off[1]) };
     check(await page.$eval('#explorer', e => !e.hidden), 'Build opens the Explode view');
+    check(await p.evaluate(async () => { await document.fonts.ready; return document.fonts.check('16px Satoshi') && [...document.fonts].some(f => f.family.includes('Satoshi') && f.status === 'loaded'); }), 'Explode view loads the self-hosted fonts');
   }
 
   // 1. modifier brains

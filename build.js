@@ -809,7 +809,14 @@
     const base = new URL('./', location.href).href;
     const html = await fetch('./index.html').then(r => r.text()).catch(() => null);
     if (!html) { toast('Could not load the explorer.'); return; }
-    const doc = html.replace(/<script src="\.\/data\.js"><\/script>/, `<script>window.MINDBLOWN=${JSON.stringify(toDataset()).replace(/</g, '\\u003c')};</script>`)
+    // the explorer frame is sandboxed (origin null), so self-hosted fonts cannot load by URL; inline them as data URLs
+    const fontCss = await fetch('./fonts/fonts.css').then(r => r.ok ? r.text() : '').then(async css => {
+      const files = [...new Set([...css.matchAll(/url\('([\w.-]+\.woff2)'\)/g)].map(m => m[1]))];
+      const data = await Promise.all(files.map(f => fetch('./fonts/' + f).then(r => r.blob()).then(b => new Promise(ok => { const fr = new FileReader(); fr.onload = () => ok(fr.result); fr.readAsDataURL(b); }))));
+      files.forEach((f, i) => { css = css.split(`url('${f}')`).join(`url('${data[i]}')`); });
+      return css.replace(/<\//g, '<\\/');
+    }).catch(() => '');
+    const doc = html.replace('<link rel="stylesheet" href="./fonts/fonts.css">', () => fontCss ? `<style>${fontCss}</style>` : '').replace(/<script src="\.\/data\.js"><\/script>/, `<script>window.MINDBLOWN=${JSON.stringify(toDataset()).replace(/</g, '\\u003c')};</script>`)
       .replace('<head>', `<head><base href="${base}">`).replace(/<nav class="brains"[\s\S]*?<\/nav>/, '');
     $('explorer-frame').srcdoc = doc; $('explorer').hidden = false;
   }
