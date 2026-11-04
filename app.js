@@ -76,6 +76,29 @@
     srcById[s.id] = n; n.pageNodes.forEach(p => p.srcNodes.push(n)); return n;
   });
 
+  // ---------- puzzles: solve to unfold ----------
+  // A synapse may carry `puzzle: { q, a, hint? }` (a prompt, an answer pattern, an optional hint). Such a synapse is sealed: its lead and text stay
+  // hidden from the map, the panel, the tooltip and search until the answer matches, and it then stays unfolded for the session (sessionStorage).
+  // Brains without the field never see any of this.
+  const solvedKey = 'mindblown.solved.' + (D.title || location.pathname);
+  const solved = new Set((() => { try { const v = JSON.parse(sessionStorage.getItem(solvedKey) || '[]'); return Array.isArray(v) ? v.filter(x => typeof x === 'string') : []; } catch { return []; } })());   // a malformed stored value must not stop the renderer
+  const sealed = n => n.kind === 'syn' && !!n.puzzle && !solved.has(n.id);
+  const leadOf = n => sealed(n) ? '? ' + n.puzzle.q : n.lead;                 // what the map, tooltip and search may show
+  const textOf = n => sealed(n) ? 'Sealed · solve to unfold' : n.text;
+  const normAns = t => String(t).toLowerCase().normalize('NFKD').replace(/[\u0300-\u036f]/g, '').replace(/[^\p{L}\p{N}.,]+/gu, ' ').trim();
+  function answerOk(n, text) {
+    let re = null; try { re = new RegExp('^(?:' + n.puzzle.a + ')$', 'iu'); } catch { re = null; }   // the pattern is authored; a broken one falls back to a plain comparison
+    return re ? re.test(normAns(text)) || re.test(String(text).trim()) : normAns(n.puzzle.a) === normAns(text);
+  }
+  let unfolding = null;   // { n, t0 } for the unfold ring drawn on a just-solved synapse
+  function solve(n, text) {
+    if (!sealed(n) || !answerOk(n, text)) return false;
+    solved.add(n.id); try { sessionStorage.setItem(solvedKey, JSON.stringify([...solved])); } catch { /* storage may be unavailable; the session still unfolds */ }
+    unfolding = { n, t0: performance.now() }; pulseSyn = n; updateStats();
+    if (selected && (selected === n || selected.id === n.page)) renderPanel(selected);
+    return true;
+  }
+
   const pageLinks = D.links.map(l => ({ source: pageById[l.s], target: pageById[l.t], w: l.w, kinds: l.kinds, notes: l.notes, kind: 'pp' }));
   pageLinks.forEach(l => {
     l.source.deg += l.w; l.target.deg += l.w;
@@ -139,9 +162,13 @@
   // the brain the way a genome is mapped, as a karyogram; 'cell' (K) as a karyocyte, one nucleated cell whose lobes are chromosome territories;
   // 'tree' (F) as a family tree, the hub the ancestor and each lobe a branch. A page may start in one with window.MINDBLOWN_OPTIONS = { layout: 'genome' }
   // or a #layout=genome hash; the tool buttons, the switches in the lobes panel and the keys toggle them.
-  const LAYOUTS = ['neural', 'genome', 'cell', 'tree'];
-  let layout = LAYOUTS.find(l => l !== 'neural' && (OPT.layout === l || new RegExp(`[#&]layout=${l}\\b`).test(location.hash))) || 'neural';
-  const genome = () => layout === 'genome', cell = () => layout === 'cell', tree = () => layout === 'tree';
+  // 'table' (T) seats the brain around a round table with no head.
+  const LAYOUTS = ['neural', 'genome', 'cell', 'tree', 'table'];
+  // the page's default layout, then the link hash on top of it: a shared `#layout=` link (including `layout=neural`) opens as sent whatever the page defaults to
+  const pageLayout = LAYOUTS.includes(OPT.layout) ? OPT.layout : 'neural';
+  const hashLayout = () => { const m = /[#&]layout=(\w+)\b/.exec(location.hash); return m && LAYOUTS.includes(m[1]) ? m[1] : null; };
+  let layout = hashLayout() || pageLayout;
+  const genome = () => layout === 'genome', cell = () => layout === 'cell', tree = () => layout === 'tree', table = () => layout === 'table';
   const mapped = () => layout !== 'neural';   // any map: neurons are held at loci, connections are drawn but do not pull
 
   // ---------- genome layout: every brain mapped like a karyotype ----------
@@ -157,14 +184,14 @@
   if (brainsIn) {
     brainsIn.forEach(b => {
       const hub = pages.find(p => p.isCenter && p.lobe === b.self) || pages.find(p => p.lobe === b.self && !isChild(p)) || null;
-      const c = { id: b.id, name: b.short || b.title, color: b.color || lobeById[b.self]?.color || '#9aa', hub, segs: lobes.filter(l => l.brain === b.id) };
+      const c = { id: b.id, name: b.short || b.title, color: b.color || lobeById[b.self]?.color || '#9aa', hub, segs: lobes.filter(l => l.brain === b.id || l.id === b.self) };   // the self lobe rides along even when the composer left its brain field empty, so every top-level page of the brain gets a locus
       chromos.push(c); c.segs.forEach(l => { chromoOf[l.id] = c; });
     });
     lobes.filter(l => !l.brain && !selfLobe(l)).forEach(l => { const c = { id: l.id, name: l.name, color: l.color, hub: null, segs: [l] }; chromos.push(c); chromoOf[l.id] = c; });
   } else lobes.filter(l => !selfLobe(l)).forEach(l => { const c = { id: l.id, name: l.name, color: l.color, hub: null, segs: [l] }; chromos.push(c); chromoOf[l.id] = c; });
   // every map is made of groups the user can pick up whole: chromosomes here, cells in the karyocyte layout, branches in the family tree.
   // A group has .loci (its top-level neurons), .hubOn (a hub neuron that sits inside it) and .on; relayout() stamps p.grp on each member
-  const groupsNow = () => genome() ? chromos : cell() ? cells : tree() ? branches : [];
+  const groupsNow = () => genome() ? chromos : cell() ? cells : tree() ? branches : table() ? seats : [];
   const grpOf = n => (isChild(n) ? n.parent : n).grp || null;
   const sameGroup = (a, b) => !!grpOf(a) && grpOf(a) === grpOf(b);
   const groupMembers = g => [...(g.hubOn ? [g.hubOn, ...g.hubOn.children] : []), ...g.loci, ...g.loci.flatMap(p => p.children)];
@@ -257,7 +284,7 @@
   if (brainsIn) {
     brainsIn.forEach(b => {
       const hub = pages.find(p => p.isCenter && p.lobe === b.self) || pages.find(p => p.lobe === b.self && !isChild(p)) || null;
-      cells.push({ id: b.id, name: b.short || b.title, color: b.color || lobeById[b.self]?.color || '#9aa', hub, segs: lobes.filter(l => l.brain === b.id) });
+      cells.push({ id: b.id, name: b.short || b.title, color: b.color || lobeById[b.self]?.color || '#9aa', hub, segs: lobes.filter(l => l.brain === b.id || l.id === b.self) });
     });
     const shared = lobes.filter(l => !l.brain && !selfLobe(l));
     if (shared.length) cells.push({ id: 'shared', name: 'Shared', color: '#b9c4e0', hub: null, segs: shared });
@@ -324,7 +351,7 @@
   {
     const mk = (id, name, color, hub, ls) => { const t = { id, name, color, hub, branches: ls.map(l => { const b = { id: l.id, name: l.name, color: l.color, lobe: l, tree: null }; branches.push(b); return b; }) }; t.branches.forEach(b => { b.tree = t; }); trees.push(t); };
     if (brainsIn) {
-      brainsIn.forEach(b => mk(b.id, b.short || b.title, b.color || lobeById[b.self]?.color || '#9aa', pages.find(p => p.isCenter && p.lobe === b.self) || pages.find(p => p.lobe === b.self && !isChild(p)) || null, lobes.filter(l => l.brain === b.id)));
+      brainsIn.forEach(b => mk(b.id, b.short || b.title, b.color || lobeById[b.self]?.color || '#9aa', pages.find(p => p.isCenter && p.lobe === b.self) || pages.find(p => p.lobe === b.self && !isChild(p)) || null, lobes.filter(l => l.brain === b.id || l.id === b.self)));
       const shared = lobes.filter(l => !l.brain && !selfLobe(l)); if (shared.length) mk('shared', 'Shared', '#b9c4e0', null, shared);
     } else mk('tree', '', '#b9c4e0', pages.find(p => p.isCenter && isSelf(p)) || pages.find(isSelf) || null, lobes);
   }
@@ -399,7 +426,47 @@
     });
     if (snap) snapToMap();
   }
-  const relayout = snap => { if (genome()) layoutGenome(snap); else if (cell()) layoutCell(snap); else if (tree()) layoutTree(snap); };
+  // ---------- table layout: a round table with no head ----------
+  // Mensa means table: a round-table society where no seat is nearer the head because there is none. Here the lobes (or the brains of a
+  // network, plus one seat per shared lobe) sit around one ring as equals; a single brain's hub takes a seat like everyone else instead of the
+  // centre, and a network brain's hub takes the first chair of its brain's seat. Neurons are the chairs along the ring; synapses are laid on
+  // the table (a ladder toward the centre); sub-neurons stand behind their parent's chair with their own ladders running outward; connections
+  // run across the table as chords. The centre stays empty on purpose. Built from lobes[].brain / self alone, like the genome layout.
+  const TB = { ring: 36, seatGap: 72, minR: 260 };
+  const seats = brainsIn ? chromos.map(c => ({ id: c.id, name: c.name, color: c.color, hub: c.hub, segs: c.segs })) : [...lobes.filter(selfLobe).map(l => ({ id: l.id, name: l.name, color: l.color, hub: null, segs: [l] })), ...chromos];
+  let tableR = 0;
+  // sub-neurons stand behind the chair: a row outside the ring, centred on the parent's angle, each with the radial direction of its parent
+  const placeKidsRadial = p => { const kids = p.children.filter(pageOn), kw = d3.sum(kids, kidPitch); let t = -kw / 2; kids.forEach(x => { const pw = kidPitch(x), d = TB.ring / 2 + 16 + x.r * 1.5, tt = t + pw / 2; x.gux = p.gux; x.guy = p.guy; x.gdx = p.gux * d - p.guy * tt; x.gdy = p.guy * d + p.gux * tt; x.gx = p.gx + x.gdx; x.gy = p.gy + x.gdy; t += pw; }); };
+  function layoutTable(snap) {
+    pages.forEach(p => { p.grp = null; });
+    seats.forEach(c => {
+      const segs = c.segs.map(l => ({ l, ps: pages.filter(p => p.lobe === l.id && p !== c.hub && !isChild(p) && pageOn(p)).sort((a, b) => b.deg - a.deg || a.title.localeCompare(b.title)) })).filter(s => s.ps.length);
+      const loci = segs.flatMap(s => s.ps);
+      c.hubOn = c.hub && pageOn(c.hub) ? c.hub : null;
+      if (c.hubOn) loci.unshift(c.hubOn);
+      c.loci = loci; c.ws = loci.map(slotH); c.on = loci.length > 0; loci.forEach(p => { p.grp = c; });
+      const kids = loci.flatMap(p => p.children.filter(pageOn));
+      c.kidR = kids.length ? Math.max(...kids.map(x => 16 + 2 * x.r * 1.5)) : 0; c.kidSyn = kids.length ? Math.max(...kids.map(synReach)) : 0;
+    });
+    const on = seats.filter(c => c.on);
+    // the ring is as long as its chairs plus a gap between seats, and never so small that a synapse ladder would reach the centre
+    const reach = Math.max(0, ...on.flatMap(c => c.loci.map(synReach))), need = d3.sum(on, c => d3.sum(c.ws)) + TB.seatGap * on.length;
+    tableR = Math.max(TB.minR, need / (2 * Math.PI), reach + 90);
+    // when the minimum radius or a long ladder sets the table, the spare circumference is shared out between the seats, so a sparse brain still sits all the way round
+    const gap = TB.seatGap + Math.max(0, 2 * Math.PI * tableR - need) / Math.max(1, on.length);
+    let a = -Math.PI / 2;   // the first seat starts at twelve o'clock
+    on.forEach(c => {
+      c.a0 = a;
+      c.loci.forEach((p, i) => {
+        const w = c.ws[i], am = a + w / 2 / tableR;
+        p.ga = am; p.gux = Math.cos(am); p.guy = Math.sin(am); p.gx = tableR * p.gux + (c.ox || 0); p.gy = tableR * p.guy + (c.oy || 0);   // c.ox/c.oy: a seat pulled away from the table by hand
+        placeKidsRadial(p); a += w / tableR;
+      });
+      c.a1 = a; c.am = (c.a0 + c.a1) / 2; a += gap / tableR;
+    });
+    if (snap) snapToMap();
+  }
+  const relayout = snap => { if (genome()) layoutGenome(snap); else if (cell()) layoutCell(snap); else if (tree()) layoutTree(snap); else if (table()) layoutTable(snap); };
   let mouseW = null;                      // cursor in world units, for lobe hover while labels are off
   // tools: 'select' = left-drag draws a marquee and moves neurons; 'pan' = left-drag pans (the classic behaviour)
   let mode = 'select', spaceDown = false;
@@ -452,13 +519,17 @@
   // orbit force: each synapse seeks an evenly spaced slot around its neuron (the dandelion explosion)
   function orbitForce(alpha) {
     const st = 0.3 * alpha;
-    const ladder = genome() || tree(), c = cell();
+    const ladder = genome() || tree(), c = cell(), tb = table();
     for (const n of activeNodes) {
       if (n.kind !== 'syn') continue;
       const p = pageById[n.page], m = p.nSyn;
       if (ladder) {   // genome and tree layouts: a ladder of synapses on the locus line, to the right of the bar (to the left of a sub-neuron)
         const gx = p.x + ladderSide(p) * ((p.r * 1.3 + 8 + n.ordinal * SYN_PITCH) * explodeF + 2);
         n.vx += (gx - n.x) * st; n.vy += (p.y - n.y) * st; continue;
+      }
+      if (tb) {   // table layout: the same ladder along the radius, laid on the table for a neuron and running outward for a sub-neuron
+        const side = isChild(p) ? 1 : -1, d = (p.r * 1.3 + 8 + n.ordinal * SYN_PITCH) * explodeF + 2;
+        n.vx += (p.x + side * (p.gux || 0) * d - n.x) * st; n.vy += (p.y + side * (p.guy || 0) * d - n.y) * st; continue;
       }
       const a = p.spin + (n.ordinal / m) * Math.PI * 2;
       // karyocyte layout: one tight ring inside the neuron's slot, so a cell never spills into its neighbour's
@@ -555,14 +626,16 @@
   function fitTransform() {
     const vp = pages.filter(p => visible(p) && !isChild(p));
     const xs = vp.map(p => p.x), ys = vp.map(p => p.y);
-    const mx = genome() ? 120 : tree() ? 60 : cell() ? 40 : brainsIn ? 260 : 150, my = genome() ? 150 : tree() ? 80 : cell() ? 40 : brainsIn ? 260 : 170;
+    const mx = genome() ? 120 : tree() ? 60 : cell() ? 40 : table() ? 120 : brainsIn ? 260 : 150, my = genome() ? 150 : tree() ? 80 : cell() ? 40 : table() ? 120 : brainsIn ? 260 : 170;
+    // the table is fitted as a whole: a sparse brain's chairs cover only part of a ring that still has to be on screen, with room behind the chairs for sub-neurons
+    if (table()) { const tr = tableR + TB.ring / 2 + Math.max(0, ...seats.filter(c => c.on).map(c => c.kidR)); xs.push(-tr, tr); ys.push(-tr, tr); }
     // the family tree fits its plates and spines, which stand above and beside the neurons
     if (tree()) branches.filter(b => b.on).forEach(b => { xs.push(b.x0, b.x1); ys.push(b.py - T.plateH, b.y1); });
     // the karyocyte layout fits its membranes, which reach well past the outermost neuron
     if (cell()) cells.filter(c => c.on).forEach(c => { xs.push(c.cx - c.Rc, c.cx + c.Rc); ys.push(c.cy - c.Rc, c.cy + c.Rc); });
     const minX = Math.min(...xs) - mx, maxX = Math.max(...xs) + mx, minY = Math.min(...ys) - my, maxY = Math.max(...ys) + my;
     const padL = window.innerWidth <= 900 ? 0 : 230; // keep the fitted brain clear of the lobes legend on desktop
-    const lx = brainsIn && !mapped() ? Math.min(210, W * 0.16) : 0, ly = genome() || cell() ? 40 : brainsIn && !mapped() ? 30 : 0;   // pixels reserved for titles beside/above the outer lobes (above the bars or cells in the maps)
+    const lx = brainsIn && !mapped() ? Math.min(210, W * 0.16) : table() ? Math.min(130, W * 0.18) : 0, ly = genome() || cell() ? 40 : table() ? 45 : brainsIn && !mapped() ? 30 : 0;   // pixels reserved for titles beside/above the outer lobes (above the bars or cells in the maps)
     const kk = Math.min((W - 60 - padL - 2 * lx) / (maxX - minX), (H - (brainsIn ? 150 : 200) - 2 * ly) / (maxY - minY)) * 0.96;
     const cx = (minX + maxX) / 2, cy = (minY + maxY) / 2;
     return { kk, tx: padL + (W - padL) / 2 - cx * kk, ty: H / 2 + 12 - cy * kk };
@@ -603,6 +676,10 @@
   const ctrlOf = l => {
     if (!mapped()) return null;
     const a = l.source, b = l.target, mx = (a.x + b.x) / 2, my = (a.y + b.y) / 2;
+    if (table()) {   // chords across the table bow toward the empty centre; neighbours at one seat take a shallow arc just inside the ring
+      if (sameGroup(a, b)) { const d = Math.hypot(mx, my) || 1, pull = Math.min(90, 10 + Math.hypot(b.x - a.x, b.y - a.y) * 0.3); return [mx - mx / d * pull, my - my / d * pull]; }
+      return [mx * 0.3, my * 0.3];
+    }
     if (sameGroup(a, b)) {
       if (cell()) { const c = grpOf(a); return [mx + (c.cx - mx) * 0.35, my + (c.cy - my) * 0.35]; }
       return [mx + G.barW / 2 + 22 + Math.abs(b.y - a.y) * 0.25, my];
@@ -763,6 +840,66 @@
     ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic';
   }
 
+  function drawTable(titleVis, tl) {
+    const sw = px => px / k, hw = TB.ring / 2, mobile = window.innerWidth <= 900;
+    const sector = (r0, r1, a0, a1) => { ctx.beginPath(); ctx.arc(0, 0, r1, a0, a1); ctx.arc(0, 0, r0, a1, a0, true); ctx.closePath(); };
+    // the table top: a faint disc with nothing on it but the chords
+    ctx.beginPath(); ctx.arc(0, 0, tableR - hw - 6, 0, Math.PI * 2); ctx.fillStyle = rgba('#a7b2cc', 0.025); ctx.fill();
+    ctx.lineWidth = sw(1); ctx.strokeStyle = rgba('#a7b2cc', 0.08); ctx.stroke();
+    const inArc = (ang, a0, a1) => { let d = ang - a0; d -= Math.floor(d / (Math.PI * 2)) * Math.PI * 2; return d <= a1 - a0; };
+    seats.forEach(c => {
+      if (!c.on) return;
+      // c.ox/c.oy: a seat dragged off the table carries its arc, bands, card and hover test with it
+      const sox = c.ox || 0, soy = c.oy || 0;
+      const mx = mouseW ? mouseW[0] - sox : 0, my = mouseW ? mouseW[1] - soy : 0, mAng = Math.atan2(my, mx), mRad = mouseW ? Math.hypot(mx, my) : -1;
+      ctx.save(); ctx.translate(sox, soy);
+      // the seat: an arc of the ring in the seat colour, banded chair by chair at alternating density like the karyogram's bars
+      sector(tableR - hw, tableR + hw, c.a0, c.a1); ctx.fillStyle = rgba(c.color, 0.08); ctx.fill();
+      // a chair with sub-neurons holds a slot wide enough for them to stand behind it; until they do (depth level), only the chair's own
+      // width is painted at full density and the reserved room stays faint, so a seat does not read as an empty stretch of band
+      let a = c.a0; c.loci.forEach((p, i) => {
+        const w = c.ws[i] / tableR, own = Math.min(w, (2 * p.r * 1.6 + 8) / tableR), al = i % 2 ? 0.30 : 0.14;
+        if (w - own > 0.001 && depthF < 0.97) {
+          sector(tableR - hw, tableR + hw, a, a + w); ctx.fillStyle = rgba(lobeColor(p), al * (0.35 + 0.65 * depthF)); ctx.fill();
+          sector(tableR - hw, tableR + hw, a + (w - own) / 2, a + (w + own) / 2); ctx.fillStyle = rgba(lobeColor(p), al * (1 - depthF)); ctx.fill();
+        } else { sector(tableR - hw, tableR + hw, a, a + w); ctx.fillStyle = rgba(lobeColor(p), al); ctx.fill(); }
+        a += w;
+      });
+      sector(tableR - hw, tableR + hw, c.a0, c.a1); ctx.lineWidth = sw(1); ctx.strokeStyle = rgba(c.color, 0.45); ctx.stroke();
+      ctx.restore();
+      // place card: the seat's name outside the ring at its middle angle, at screen size, with a count beneath; hover keeps it while labels are off
+      const hovered = mouseW && mRad > tableR - hw - 30 && mRad < tableR + hw + 60 && inArc(mAng, c.a0 - 0.02, c.a1 + 0.02);
+      const pitch = (c.a1 - c.a0) * tableR * k;
+      const v = titleVis * Math.max(tl, hovered ? 1 : 0.55) * (hovered ? 1 : clamp01((pitch - 8) / 14)); if (v < 0.02) return;
+      // the card stands clear of any sub-neurons behind the chairs and, once exploded, of their ladders
+      const out = hw + depthF * c.kidR + explodeF * c.kidSyn, cx = Math.cos(c.am), cy = Math.sin(c.am), [sx, sy] = toScreen((tableR + out) * cx + sox, (tableR + out) * cy + soy);
+      // when neuron labels are showing (or an outward-labelled chair of this seat is hovered, which shows its label even with labels off),
+      // chairs near the card's angle carry their labels outward under it, so the card steps past the longest of them (measured, not guessed)
+      const outward = p => !(p.children.some(pageOn) && depthF > 0.5), nearCard = p => Math.abs(Math.sin(p.ga - c.am)) * (tableR + hw) * k < 48;
+      ctx.font = `500 ${sw(12)}px 'Satoshi', sans-serif`;
+      const under = c.loci.filter(p => outward(p) && nearCard(p)), lblF = under.some(p => p === hover) ? 1 : tl;
+      let reach = under.length ? Math.max(...under.map(p => (p.r / Math.pow(k, 0.45) + sw(6)) * k + ctx.measureText(p.title).width * k + 10)) : 0;
+      // sub-neurons standing behind the chairs label outward too (smaller type, once the depth level is up), and the card already stands past their row
+      if (depthF > 0.5) {
+        ctx.font = `500 ${sw(10.5)}px 'Satoshi', sans-serif`;
+        const kidsUnder = c.loci.flatMap(p => p.children.filter(x => pageOn(x) && Math.abs(Math.sin(Math.atan2(x.gy - soy, x.gx - sox) - c.am)) * (tableR + hw) * k < 48));
+        if (kidsUnder.length) reach = Math.max(reach, clamp01((k - 1.05) / 0.1) * depthF * Math.max(...kidsUnder.map(x => (x.r / Math.pow(k, 0.45) + sw(6)) * k + ctx.measureText(x.title).width * k + 10)));
+      }
+      const push = 14 + lblF * clamp01((k - 0.45) / 0.25) * reach, ox = cx * push, oy = cy * push;
+      const fs = Math.max(9.5, Math.min(mobile ? 11 : 14, 10 + Math.sqrt(c.loci.length) * 1.2)), fs2 = Math.max(9, fs - 3);
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      ctx.textAlign = cx > 0.2 ? 'left' : cx < -0.2 ? 'right' : 'center'; ctx.textBaseline = 'middle';
+      const lines = wrapTitle(c.name, 150), lh = fs + 2, block = lines.length * lh + fs2 + 4, top = sy + oy - block / 2 + (cy * block) / 2;
+      ctx.font = `600 ${fs}px 'Clash Display', 'Satoshi', sans-serif`; ctx.fillStyle = rgba(c.color, 0.9 * v);
+      lines.forEach((ln, i) => ctx.fillText(ln, sx + ox, top + lh / 2 + i * lh));
+      const subs = d3.sum(c.loci, p => p.children.filter(pageOn).length), syn = d3.sum(c.loci, p => p.nSyn);
+      ctx.font = `500 ${fs2}px 'Satoshi', sans-serif`; ctx.fillStyle = rgba('#a7b2cc', 0.8 * v);
+      ctx.fillText(`${c.loci.length}${subs ? `+${subs}` : ''} · ${syn}`, sx + ox, top + lines.length * lh + 4 + fs2 / 2);
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0); ctx.translate(tx, ty); ctx.scale(k, k);
+    });
+    ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic';
+  }
+
   // ---------- draw ----------
   function draw(now) {
     const captionPaint = [];
@@ -789,7 +926,7 @@
 
     const lobeVis = clamp01((1.05 - k) / 0.45);           // lobe halos, visible when zoomed out
     const synVis = forceExplode ? 1 : clamp01((k - 1.25) / 0.45); // synapses fade in
-    const labelVis = clamp01((k - 0.62) / 0.4);
+    const labelVis = table() ? clamp01((k - 0.42) / 0.2) : clamp01((k - 0.62) / 0.4);   // at the table the radial labels are the read, so they are up at the fitted zoom
     const synLabelVisAll = clamp01((k - 3.4) / 0.6);
     const synLabelVisFocus = clamp01((k - 1.6) / 0.4);
     const srcLabelVis = clamp01((k - 3.2) / 0.8);
@@ -807,7 +944,7 @@
     const inView = (x, y) => x > vx0 && x < vx1 && y > vy0 && y < vy1;
 
     // maps: the karyogram, the cells or the tree (bars, membranes, plates, titles) stand in for the lobe halos
-    if (genome()) drawKaryogram(clamp01((1.7 - k) / 0.6), labelF); else if (cell()) drawCells(clamp01((1.7 - k) / 0.6), labelF); else if (tree()) drawTree(clamp01((1.7 - k) / 0.6), labelF);
+    if (genome()) drawKaryogram(clamp01((1.7 - k) / 0.6), labelF); else if (cell()) drawCells(clamp01((1.7 - k) / 0.6), labelF); else if (tree()) drawTree(clamp01((1.7 - k) / 0.6), labelF); else if (table()) drawTable(clamp01((1.7 - k) / 0.6), labelF);
     // lobe halos
     if (lobeVis > 0 && !mapped()) {
       ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic';
@@ -820,6 +957,8 @@
       }).filter(Boolean).sort((a, b) => b.ps.length - a.ps.length);   // big lobes claim their spot first; small ones walk
       const placed = pages.filter(isSelf).map(p => { const [x,y]=toScreen(p.x,p.y);ctx.font="600 15px 'Satoshi', sans-serif";const w=ctx.measureText(p.title).width+24;return {x:x-w/2,y:y+8,w,h:36}; }); // Reserve hub titles.
       const hitsBox = b => placed.some(q => b.x < q.x + q.w && b.x + b.w > q.x && b.y < q.y + q.h && b.y + b.h > q.y);
+      // A lobe's own painted neurons can sit outside its ring (dragged or outlying), so check them too.
+      const ownCover = (b, self) => self.ps.reduce((a, p) => { if (!pageOn(p) || depthA(p) < 0.03) return a; const [x, y] = toScreen(p.x, p.y), r = nodeR(p) * k + 2; return a + Math.max(0, Math.min(b.x + b.w, x + r) - Math.max(b.x, x - r)) * Math.max(0, Math.min(b.y + b.h, y + r) - Math.max(b.y, y - r)); }, 0);
       const hitsCircle = (b, self) => circles.some(c => c !== self && Math.hypot(Math.max(b.x, Math.min(c.sx, b.x + b.w)) - c.sx, Math.max(b.y, Math.min(c.sy, b.y + b.h)) - c.sy) < c.sr * 0.9);
       // the screen area a title may use: right of the lobes legend, below the header, above the hint bar
       const edge = { x0: window.innerWidth <= 900 ? 8 : 238, x1: W - 80, y0: 78, y1: H - 70 };
@@ -844,6 +983,8 @@
         ctx.font = `600 ${fs}px 'Clash Display', 'Satoshi', sans-serif`; const w1 = ctx.measureText(l.name).width;
         ctx.font = `500 ${fs2}px 'Satoshi', sans-serif`; const w2 = ctx.measureText(line2).width;
         const bw = Math.max(w1, w2), bh = fs + fs2 + 10;
+        const tl = Math.max(labelF, mouseW && Math.hypot(mouseW[0] - cx, mouseW[1] - cy) < rr ? 1 : 0);   // hovered lobe keeps its title
+        if (tl < 0.02) return;   // a hidden caption reserves no space
         let best = null, bestPen = Infinity;
         const tries = [0, 0.5, -0.5, 1, -1, 1.5, -1.5, 2, -2, 2.5, -2.5, Math.PI].flatMap(da => [[da, 18], [da, 18 + bh], [da, 18 + 2 * bh], [da,18+3*bh]]);
         tries.sort((p, q) => (Math.abs(p[0]) + p[1] / 40) - (Math.abs(q[0]) + q[1] / 40));
@@ -855,13 +996,12 @@
           // Reserve the painted background too, not only the text metrics.
           // Otherwise a later caption's padding can cover a neighbor's text.
           const box = { x: bx - 4, y: by - 2, w: bw + 8, h: bh + 4, textY: by, sx, sy, align };
-          if (!hitsBox(box) && !hitsCircle(box, c) && !offEdge(box)) { best = box; bestPen = 0; break; }
-          const pen = penalty(box, c); if (pen < bestPen) { bestPen = pen; best = box; }
+          const cover = ownCover(box, c);
+          if (!hitsBox(box) && !hitsCircle(box, c) && !offEdge(box) && !cover) { best = box; bestPen = 0; break; }
+          const pen = penalty(box, c) + cover / 40; if (pen < bestPen) { bestPen = pen; best = box; }
         }
         if (bestPen > 0) return; // The sidebar retains labels that cannot fit without collisions.
         placed.push(best);
-        const tl = Math.max(labelF, mouseW && Math.hypot(mouseW[0] - cx, mouseW[1] - cy) < rr ? 1 : 0);   // hovered lobe keeps its title
-        if (tl < 0.02) return;
         captionPaint.push(() => {
         ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
         ctx.textAlign = best.align; ctx.textBaseline = 'top';
@@ -869,7 +1009,7 @@
         const length=Math.hypot(lx-c.sx,ly-c.sy)||1;
         ctx.beginPath();ctx.moveTo(c.sx+(lx-c.sx)*c.sr/length,c.sy+(ly-c.sy)*c.sr/length);ctx.lineTo(lx,ly);
         ctx.strokeStyle=rgba(l.color,0.65*lobeVis*tl);ctx.lineWidth=1.1;ctx.setLineDash([3,3]);ctx.stroke();ctx.setLineDash([]);
-        ctx.fillStyle=rgba('#080d16',0.9*tl);ctx.fillRect(best.x,best.y,best.w,best.h);
+        ctx.fillStyle=rgba('#080d16',0.9*lobeVis*tl);ctx.fillRect(best.x,best.y,best.w,best.h);
         ctx.font = `600 ${fs}px 'Clash Display', 'Satoshi', sans-serif`; ctx.fillStyle = rgba(l.color, 0.85 * lobeVis * tl); ctx.fillText(l.name, best.sx, best.textY + 2);
         ctx.font = `500 ${fs2}px 'Satoshi', sans-serif`; ctx.fillStyle = rgba('#a7b2cc', 0.8 * lobeVis * tl); ctx.fillText(line2, best.sx, best.textY + fs + 8);
         ctx.setTransform(dpr, 0, 0, dpr, 0, 0); ctx.translate(tx, ty); ctx.scale(k, k);
@@ -904,7 +1044,7 @@
       const da = Math.min(depthA(l.source), depthA(l.target)); if (da < 0.03) return;
       if (!inView(l.source.x, l.source.y) && !inView(l.target.x, l.target.y)) return;
       const inFocus = focusSet && focusSet.has(l.source) && focusSet.has(l.target) && (l.source === focus || l.target === focus);
-      const base = (0.16 + Math.min(l.w, 6) * 0.045) * (mapped() && !sameGroup(l.source, l.target) ? 0.45 : 1);   // maps: arches between groups stay faint so the groups read
+      const base = (0.16 + Math.min(l.w, 6) * 0.045) * (mapped() && !sameGroup(l.source, l.target) ? (table() ? 0.7 : 0.45) : 1);   // table chords soften only a little so the ring still reads   // maps: arches between groups stay faint so the groups read
       const a = (focusSet ? (inFocus ? 0.85 : 0.05) : base) * da;
       const col = l.source.lobe === l.target.lobe ? lobeColor(l.source) : '#b9c4e0';
       ctx.strokeStyle = rgba(col, a);
@@ -975,9 +1115,20 @@
         const related = !focusSet || focusSet.has(n);
         const r = nodeR(n) * (0.5 + 0.5 * explodeF) * da;
         const col = lobeColor(n);
-        const isPulse = n === pulseSyn;
-        ctx.fillStyle = rgba(col, (related ? 0.95 : 0.15) * v * da);
-        ctx.beginPath(); ctx.arc(n.x, n.y, r * (isPulse ? 1.9 : 1), 0, Math.PI * 2); ctx.fill();
+        const isPulse = n === pulseSyn, lock = sealed(n);
+        if (lock) {   // a sealed rung: a hollow ring with a dark core, the fact still folded inside
+          ctx.strokeStyle = rgba(col, (related ? 0.9 : 0.15) * v * da); ctx.lineWidth = sw(1.1);
+          ctx.beginPath(); ctx.arc(n.x, n.y, r * (isPulse ? 1.9 : 1.15), 0, Math.PI * 2); ctx.stroke();
+          ctx.fillStyle = rgba(col, (related ? 0.35 : 0.08) * v * da); ctx.beginPath(); ctx.arc(n.x, n.y, r * 0.45, 0, Math.PI * 2); ctx.fill();
+        } else {
+          ctx.fillStyle = rgba(col, (related ? 0.95 : 0.15) * v * da);
+          ctx.beginPath(); ctx.arc(n.x, n.y, r * (isPulse ? 1.9 : 1), 0, Math.PI * 2); ctx.fill();
+        }
+        if (unfolding && unfolding.n === n) {   // the seal breaking: one ring runs outward over ~0.9 s
+          const age = (now - unfolding.t0) / 900;
+          if (age < 1) { ctx.strokeStyle = rgba('#ffffff', 0.85 * (1 - age)); ctx.lineWidth = sw(1.6); ctx.beginPath(); ctx.arc(n.x, n.y, r + sw(3 + 26 * age), 0, Math.PI * 2); ctx.stroke(); }
+          else unfolding = null;
+        }
         if (related && n.links.length) { ctx.strokeStyle = rgba('#ffffff', 0.7 * v); ctx.lineWidth = sw(0.8); ctx.beginPath(); ctx.arc(n.x, n.y, r + sw(1.6), 0, Math.PI * 2); ctx.stroke(); }
         if (isPulse) { ctx.strokeStyle = rgba('#ffffff', 0.9); ctx.lineWidth = sw(1.5); ctx.beginPath(); ctx.arc(n.x, n.y, r + sw(5), 0, Math.PI * 2); ctx.stroke(); }
         // maps are dense, so synapse labels show only for the focused neuron, where the rest is dimmed; on a ladder they hang at an angle
@@ -986,11 +1137,12 @@
           const p = pageById[n.page];
           let ang = Math.atan2(n.y - p.y, n.x - p.x), flip = Math.cos(ang) < 0;
           const onLadder = genome() || tree();
-          if (onLadder) { flip = ladderSide(p) < 0; ang = flip ? -1.0 : 1.0; }   // down-right for a right-hand ladder, down-left for a left-hand one
+          if (onLadder) { flip = ladderSide(p) < 0; ang = flip ? -1.0 : 1.0; }
+          else if (table()) { ang += 0.9; flip = Math.cos(ang) < 0; }   // table layout: hang off the radial ladder at a slant, kept upright   // down-right for a right-hand ladder, down-left for a left-hand one
           ctx.save(); ctx.translate(n.x, n.y); ctx.rotate(flip && !onLadder ? ang + Math.PI : ang);
           ctx.font = `500 ${sw(10.5)}px 'Satoshi', sans-serif`; ctx.textBaseline = 'middle'; ctx.textAlign = flip ? 'right' : 'left';
           ctx.fillStyle = rgba('#e9eefb', 0.92 * lv * v * explodeF);
-          const label = n.lead.length > 36 ? n.lead.slice(0, 34) + '…' : n.lead;
+          const lead = leadOf(n), label = lead.length > 36 ? lead.slice(0, 34) + '…' : lead;
           ctx.fillText(label, flip ? -(r + sw(5)) : r + sw(5), 0);
           ctx.restore();
         }
@@ -1040,6 +1192,17 @@ captionPaint.push(() => {ctx.shadowColor="#06080f";ctx.shadowBlur=4;
         const fs = isSelf(n) ? 15 : isChild(n) ? 10.5 : 12;
         ctx.font = `${isSelf(n) ? 600 : 500} ${sw(fs)}px 'Satoshi', sans-serif`;
         // ladder layouts: labels sit beside the band like gene annotations (on the ladder's side) and lift above the synapse ladder
+        if (table() && n.gux !== undefined) {
+          // table layout: labels read along the radius like place cards. Outward for a plain chair (radial labels diverge there, so neighbours
+          // stay apart), inward beside the ladder for a chair once its sub-neurons are standing behind it (outward like a plain chair until then, so a long label never crosses the table), outward beside its own ladder for a sub-neuron.
+          const kidsOn = !isChild(n) && n.children.some(pageOn) && depthF > 0.5, dir = kidsOn ? -1 : 1, ux = n.gux * dir, uy = n.guy * dir;
+          const lift = kidsOn || isChild(n) ? explodeF * (n.nSyn ? r * 0.6 + sw(8) : 0) : 0;
+          const ang = Math.atan2(uy, ux), flip = Math.cos(ang) < 0, px = n.x + ux * (r + sw(6)) - uy * lift, py = n.y + uy * (r + sw(6)) + ux * lift;
+          ctx.save(); ctx.translate(px, py); ctx.rotate(flip ? ang + Math.PI : ang); ctx.textAlign = flip ? 'right' : 'left'; ctx.textBaseline = 'middle';
+          ctx.fillStyle = rgba('#000000', 0.55 * lv * a); ctx.fillText(n.title, sw(0.8), sw(0.8));
+          ctx.fillStyle = rgba(related ? '#f1f4ff' : '#b6bfd8', (related ? 0.95 : 0.74) * lv); ctx.fillText(n.title, 0, 0);   // radial labels are the table's main read, so they sit brighter than the free layout's
+          ctx.restore(); ctx.shadowBlur = 0; return;   // the blur was set before save(), so restore() keeps it
+        }
         const beside = (genome() || tree()) && !(isSelf(n) && !brainsIn && !isChild(n)), side = beside ? ladderSide(n) : 0;
         const lx = beside ? n.x + side * (r + sw(6)) : n.x, ly = beside ? n.y - explodeF * (n.nSyn ? r * 0.6 + sw(8) : 0) : n.y + r + sw(5);
         ctx.textAlign = beside ? (side > 0 ? 'left' : 'right') : 'center'; ctx.textBaseline = beside ? 'middle' : 'top';
@@ -1172,7 +1335,8 @@ ctx.shadowBlur=0;});
   canvas.addEventListener('pointerleave', () => { hover = null; mouseW = null; tip.hidden = true; });
   function tipHtml(n) {
     if (n.kind === 'page') return `<span class="k">${isChild(n) ? `sub-neuron of ${esc(n.parent.title)}` : typeName(n) + ' · ' + esc(lobeById[n.lobe].name)}</span><b>${esc(n.title)}</b>${n.nSyn} synapses · ${n.neighbors.length} connections${n.children.length ? ` · ${n.children.length} sub-neurons` : ''}`;
-    if (n.kind === 'syn') return `<span class="k">synapse of ${esc(pageById[n.page].title)}</span><b>${esc(n.lead)}</b>${esc(n.text.slice(0, 140))}${n.text.length > 140 ? '…' : ''}`;
+    if (n.kind === 'syn') return sealed(n) ? `<span class="k">sealed synapse of ${esc(pageById[n.page].title)}</span><b>${esc(n.puzzle.q)}</b>solve to unfold · click to answer`
+      : `<span class="k">synapse of ${esc(pageById[n.page].title)}</span><b>${esc(n.lead)}</b>${esc(n.text.slice(0, 140))}${n.text.length > 140 ? '…' : ''}`;
     return `<span class="k">${srcKind(n)}</span><b>${esc(n.label)}</b>cited by ${n.pageNodes.length} neuron${n.pageNodes.length > 1 ? 's' : ''}`;
   }
   const srcKind = n => ({ session: 'Perplexity session', github: D.demo ? 'Code host (demo)' : 'GitHub', web: 'Web source', gmail: 'Gmail (metadata)', calendar: 'Google Calendar', spotify: 'Spotify', plaid: 'Bank data (names only)', memory: 'Memory note', wiki: 'Brain page' }[n.kindOf] || 'Source');
@@ -1193,6 +1357,7 @@ ctx.shadowBlur=0;});
     else if (e.key === 'g' || e.key === 'G') toggleLayout('genome');
     else if (e.key === 'k' || e.key === 'K') toggleLayout('cell');
     else if (e.key === 'f' || e.key === 'F') toggleLayout('tree');
+    else if (e.key === 't' || e.key === 'T') toggleLayout('table');
   });
 
   function select(n, opts = {}) {
@@ -1217,7 +1382,7 @@ ctx.shadowBlur=0;});
     }
     else if (!opts.noZoom) zoomTo(n, Math.max(k, 3));
     renderPanel(n); panel.hidden = false;
-    if (n.kind === 'page' && history.replaceState) { try { history.replaceState(null, '', '#n=' + encodeURIComponent(n.id) + (mapped() ? '&layout=' + layout : '')); } catch (_) { /* Opaque preview: selection still works. */ } }
+    if (n.kind === 'page' && history.replaceState) { try { history.replaceState(null, '', '#n=' + encodeURIComponent(n.id) + (layout !== pageLayout ? '&layout=' + layout : '')); } catch (_) { /* Opaque preview: selection still works. */ } }
   }
   function clearSelection() { if (selected && selected.kind === 'page' && !selected.pinned) { selected.fx = null; selected.fy = null; } selected = null; pulseSyn = null; panel.hidden = true; }
 
@@ -1227,7 +1392,8 @@ ctx.shadowBlur=0;});
     if (n.kind === 'page') {
       h += `<div class="kind"><span class="sw" style="background:${col};color:${col}"></span>${typeName(n)} · ${esc(lobeById[n.lobe].name)}</div>`;
       h += `<h2>${esc(n.title)}</h2><p class="desc">${esc(n.desc || n.intro)}</p>`;
-      h += `<div class="meta">${n.updated ? `<span>updated ${n.updated}</span>` : ''}<span>${n.nSyn} synapses</span><span>${n.neighbors.length} connections</span><span>${n.srcNodes.length} sources</span></div>`;
+      const nLock = n.synNodes.filter(sealed).length;
+      h += `<div class="meta">${n.updated ? `<span>updated ${n.updated}</span>` : ''}<span>${n.nSyn} synapses</span>${nLock ? `<span class="sealed-n">${nLock} sealed</span>` : ''}<span>${n.neighbors.length} connections</span><span>${n.srcNodes.length} sources</span></div>`;
       const ob = otherBrains(n.id);
       if (brainsIn && n.brain && N && !ob.length) { const b = N.brains.find(x => x.id === n.brain); if (b) h += `<h3>Brain</h3><ul><li class="nb net"><a href="${esc(b.href)}#n=${encodeURIComponent(n.orig || n.id)}"><span class="sw" style="background:${esc(b.color)}"></span><span class="t">Open in the ${esc(b.title)} brain<span class="note">this neuron belongs to ${esc(b.title)} → open</span></span></a></li></ul>`; }
       if (ob.length) h += `<h3>Shared across the network</h3><ul>` + ob.map(b => `<li class="nb net"><a href="${esc(b.href)}#n=${encodeURIComponent(n.id)}"><span class="sw" style="background:${esc(b.color)}"></span><span class="t">Same neuron in ${esc(b.title)}<span class="note">${b.synapses} synapses · ${b.connections} connections there → open</span></span></a></li>`).join('') + `</ul>`;
@@ -1246,20 +1412,30 @@ ctx.shadowBlur=0;});
         h += `<h3>Synapses <span>${n.nSyn}</span></h3>`;
         bySection.forEach((list, sec) => {
           if (bySection.size > 1) h += `<div class="kind" style="margin:8px 0 4px 10px">${esc(sec)}</div>`;
-          h += `<ul>` + list.map(s => `<li class="syn" data-id="${esc(s.id)}"><div class="lead">${esc(s.lead)}</div><div class="txt">${esc(s.text)}</div>${s.links.length ? `<div class="lk">→ ${s.links.map(id => esc(pageById[id]?.title || id)).join(' · ')}</div>` : ''}</li>`).join('') + `</ul>`;
+          h += `<ul>` + list.map(s => sealed(s)
+            ? `<li class="syn sealed" data-id="${esc(s.id)}"><div class="lead">${esc(s.puzzle.q)}</div><div class="txt">Sealed · solve to unfold</div></li>`
+            : `<li class="syn" data-id="${esc(s.id)}"><div class="lead">${esc(s.lead)}</div><div class="txt">${esc(s.text)}</div>${s.links.length ? `<div class="lk">→ ${s.links.map(id => esc(pageById[id]?.title || id)).join(' · ')}</div>` : ''}</li>`).join('') + `</ul>`;
         });
       }
       const incoming = syns.filter(s => s.links.includes(n.id));
       if (incoming.length) {
-        h += `<h3>Synapses pointing here <span>${incoming.length}</span></h3><ul>` + incoming.map(s => `<li class="syn" data-id="${esc(s.id)}"><div class="lead">${esc(pageById[s.page].title)} › ${esc(s.lead)}</div><div class="txt">${esc(s.text.slice(0, 180))}${s.text.length > 180 ? '…' : ''}</div></li>`).join('') + `</ul>`;
+        h += `<h3>Synapses pointing here <span>${incoming.length}</span></h3><ul>` + incoming.map(s => `<li class="syn${sealed(s) ? ' sealed' : ''}" data-id="${esc(s.id)}"><div class="lead">${esc(pageById[s.page].title)} › ${esc(leadOf(s))}</div><div class="txt">${esc(textOf(s).slice(0, 180))}${textOf(s).length > 180 ? '…' : ''}</div></li>`).join('') + `</ul>`;
       }
       if (n.srcNodes.length) {
         h += `<h3>Sources <span>${n.srcNodes.length}</span></h3><ul>` + n.srcNodes.map(s => `<li class="src"><span class="sk">${esc(srcKindShort(s))}</span>${esc(s.label)}</li>`).join('') + `</ul>`;
       }
     } else if (n.kind === 'syn') {
       const p = pageById[n.page];
-      h += `<div class="kind"><span class="sw" style="background:${col};color:${col}"></span>synapse · ${esc(n.section)}</div>`;
-      h += `<h2>${esc(n.lead)}</h2><p class="desc">${esc(n.text)}</p>`;
+      h += `<div class="kind"><span class="sw" style="background:${col};color:${col}"></span>${sealed(n) ? 'sealed synapse' : 'synapse'} · ${esc(n.section)}</div>`;
+      if (sealed(n)) {
+        // the puzzle stands where the fact will: prompt, an answer box, a hint on request; a wrong answer only shakes the box
+        h += `<h2>${esc(n.puzzle.q)}</h2><p class="desc">Solve to unfold this synapse. It stays unfolded for the rest of this session.</p>`;
+        h += `<form class="puzzle" autocomplete="off"><input type="text" name="a" placeholder="Your answer" aria-label="Your answer" autocapitalize="off" spellcheck="false"><button type="submit">Solve</button></form>`;
+        h += `<div class="puzzle-row">${n.puzzle.hint ? `<button type="button" class="hint-btn">Show a hint</button><span class="puzzle-hint" hidden>${esc(n.puzzle.hint)}</span>` : ''}<span class="verdict" aria-live="polite"></span></div>`;
+      } else {
+        h += `<h2>${esc(n.lead)}</h2><p class="desc">${esc(n.text)}</p>`;
+        if (n.puzzle) h += `<div class="meta"><span class="unfolded">unfolded · solved this session</span></div>`;
+      }
       h += `<h3>Belongs to</h3><ul><li class="nb" data-id="${esc(p.id)}"><span class="sw" style="background:${col}"></span><span class="t">${esc(p.title)}</span></li></ul>`;
       if (n.links.length) h += `<h3>Fires toward</h3><ul>` + n.links.map(id => pageById[id] ? `<li class="nb" data-id="${esc(id)}"><span class="sw" style="background:${lobeColor(pageById[id])}"></span><span class="t">${esc(pageById[id].title)}</span></li>` : '').join('') + `</ul>`;
       if (n.cites.length) h += `<h3>Sources</h3><ul>` + n.cites.map(u => srcById[u] ? `<li class="src"><span class="sk">${esc(srcKindShort(srcById[u]))}</span>${esc(srcById[u].label)}</li>` : '').join('') + `</ul>`;
@@ -1270,8 +1446,21 @@ ctx.shadowBlur=0;});
     }
     panelBody.innerHTML = h;
     panelBody.querySelectorAll('.nb').forEach(el => el.addEventListener('click', () => { const m = pageById[el.dataset.id]; if (m) { ensureVisible(m); select(m); } }));
+    const form = panelBody.querySelector('form.puzzle');
+    if (form && n.kind === 'syn') {
+      const input = form.querySelector('input'), verdict = panelBody.querySelector('.verdict');
+      form.addEventListener('submit', e => {
+        e.preventDefault();
+        if (solve(n, input.value)) return;   // solve() re-renders the panel with the fact
+        verdict.textContent = 'Not yet.'; form.classList.remove('shake'); void form.offsetWidth; form.classList.add('shake'); input.select();
+      });
+      const hb = panelBody.querySelector('.hint-btn');
+      if (hb) hb.addEventListener('click', () => { panelBody.querySelector('.puzzle-hint').hidden = false; hb.hidden = true; });
+      setTimeout(() => input.focus(), 50);
+    }
     panelBody.querySelectorAll('.syn').forEach(el => el.addEventListener('click', () => {
       const s = synById[el.dataset.id]; if (!s) return;
+      if (sealed(s)) { ensureVisible(s); select(s); return; }   // a sealed synapse opens its puzzle instead of just zooming
       panelBody.querySelectorAll('.syn').forEach(x => x.classList.remove('active')); el.classList.add('active');
       ensureVisible(s); pulseSyn = s; zoomTo(s, Math.max(k, 3.4), 800);
       // same folded-child recentering as select(): the synapse moves while its sub-neuron unfolds
@@ -1306,23 +1495,81 @@ ctx.shadowBlur=0;});
   document.getElementById('z-in').addEventListener('click', () => d3.select(canvas).transition().duration(350).call(zoom.scaleBy, 1.6));
   document.getElementById('z-out').addEventListener('click', () => d3.select(canvas).transition().duration(350).call(zoom.scaleBy, 1 / 1.6));
   document.getElementById('z-fit').addEventListener('click', () => { clearSelection(); fitAll(); });
-  // tool buttons live above the zoom controls; injected so every brain page gets them without markup changes
-  const tools = document.createElement('div'); tools.id = 'tools'; tools.className = 'zoom-ctl tools'; tools.setAttribute('role', 'group'); tools.setAttribute('aria-label', 'Tools');
-  tools.innerHTML = `<button class="tool-mode on" data-mode="select" title="Select & move (V): drag a box to select neurons, drag neurons to move them; mouse3 or Space pans" aria-label="Select and move tool">⬚</button>
+  // ---------- side rail ----------
+  // The right-hand column groups every shortcut by job so it stays short as functions grow: Tools (select, pan, release), View (labels,
+  // layouts), File (saved layouts, screenshot) and Zoom. Layouts and saved layouts open flyouts beside the rail instead of adding a button per
+  // entry. Injected so every brain page gets it without markup changes; the markup's #zoom-ctl is adopted as the last group.
+  const svg = d => `<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${d}</svg>`;
+  const ICON = {
+    neural: svg('<circle cx="12" cy="12" r="2.4"/><circle cx="5" cy="7" r="1.6"/><circle cx="19" cy="6" r="1.6"/><circle cx="18.5" cy="17.5" r="1.6"/><circle cx="6" cy="18" r="1.6"/><path d="M9.9 10.8 6.3 8M14 10.6 17.7 7.1M13.8 13.6l3.4 2.8M10.1 13.5 7.2 16.8"/>'),
+    genome: svg('<path d="M7 3.5c-1.6 0-2.5 1-2.5 2.5v3.6c0 1 .7 1.6 1.4 2.1-.7.5-1.4 1.1-1.4 2.1V18c0 1.5.9 2.5 2.5 2.5s2.5-1 2.5-2.5v-4.2c0-1-.7-1.6-1.4-2.1.7-.5 1.4-1.1 1.4-2.1V6c0-1.5-.9-2.5-2.5-2.5z"/><path d="M17 3.5c-1.6 0-2.5 1-2.5 2.5v5.2c0 1 .7 1.6 1.4 2.1-.7.5-1.4 1.1-1.4 2.1V18c0 1.5.9 2.5 2.5 2.5s2.5-1 2.5-2.5v-2.6c0-1-.7-1.6-1.4-2.1.7-.5 1.4-1.1 1.4-2.1V6c0-1.5-.9-2.5-2.5-2.5z"/><path d="M4.5 7.5h5M4.5 16h5M14.5 8.5h5M14.5 17h5"/>'),
+    cell: svg('<circle cx="12" cy="12" r="9.5"/><circle cx="12" cy="12" r="5"/><circle cx="12" cy="12" r="1.4" fill="currentColor" stroke="none"/><path d="M12 7v5M12 12l4.3 2.5M12 12l-4.3 2.5"/>'),
+    tree: svg('<circle cx="5" cy="12" r="2.2"/><circle cx="19" cy="5.5" r="2.2"/><circle cx="19" cy="12" r="2.2"/><circle cx="19" cy="18.5" r="2.2"/><path d="M7.2 12h4.8M12 12V5.5h4.8M12 12h4.8M12 12v6.5h4.8"/>'),
+    table: svg('<circle cx="12" cy="12" r="8.5"/><circle cx="12" cy="12" r="4" opacity="0.45"/><path d="M12 3.5v2.2M20.5 12h-2.2M12 20.5v-2.2M3.5 12h2.2M18 6l-1.6 1.6M18 18l-1.6-1.6M6 18l1.6-1.6M6 6l1.6 1.6"/>'),
+    labels: svg('<path d="M3 12V5a2 2 0 0 1 2-2h7l9 9-9 9-9-9z"/><circle cx="7.5" cy="7.5" r="1.2" fill="currentColor" stroke="none"/>'),
+    save: svg('<path d="M5 3.5h11l3.5 3.5v12a1.5 1.5 0 0 1-1.5 1.5H5A1.5 1.5 0 0 1 3.5 19V5A1.5 1.5 0 0 1 5 3.5z"/><path d="M7.5 3.5v5h8v-5"/><rect x="7" y="13" width="10" height="7.5" rx="1"/>'),
+    shot: svg('<path d="M4 8h3l2-3h6l2 3h3a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V9a1 1 0 0 1 1-1z"/><circle cx="12" cy="13.5" r="3.5"/>'),
+    open: svg('<path d="M3.5 7.5V5.5A1.5 1.5 0 0 1 5 4h4l2 2.5h7.5A1.5 1.5 0 0 1 20 8v1.5"/><path d="M3.5 7.5h17l-1.6 10.2a1.5 1.5 0 0 1-1.5 1.3H6.6a1.5 1.5 0 0 1-1.5-1.3z"/>'),
+    down: svg('<path d="M12 4v11M7.5 10.5 12 15l4.5-4.5M4.5 19.5h15"/>'),
+  };
+  const rail = document.createElement('div'); rail.id = 'rail'; rail.className = 'rail';
+  const railGroup = (id, label, html) => { const g = document.createElement('div'); g.id = id; g.className = 'zoom-ctl rail-group'; g.setAttribute('role', 'group'); g.setAttribute('aria-label', label); g.innerHTML = html; rail.appendChild(g); return g; };
+  railGroup('tools', 'Tools', `<button class="tool-mode on" data-mode="select" title="Select & move (V): drag a box to select neurons, drag neurons to move them; mouse3 or Space pans" aria-label="Select and move tool">⬚</button>
     <button class="tool-mode" data-mode="pan" title="Pan (H): drag to pan the view" aria-label="Pan tool">✋</button>
-    <button id="release-pins" title="Release hand-placed neurons (R)" aria-label="Release hand-placed neurons">⟲</button>
-    <button id="labels-toggle" title="Labels on/off (L): when off, only the neuron or lobe under the cursor keeps its label" aria-label="Toggle labels" aria-pressed="true"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 12V5a2 2 0 0 1 2-2h7l9 9-9 9-9-9z"/><circle cx="7.5" cy="7.5" r="1.2" fill="currentColor" stroke="none"/></svg></button>
-    <button id="layout-toggle" title="Genome layout (G): arrange the brain like a karyogram — lobes or brains as chromosomes, neurons as bands, the hub at the centromere" aria-label="Toggle genome layout" aria-pressed="false"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 3.5c-1.6 0-2.5 1-2.5 2.5v3.6c0 1 .7 1.6 1.4 2.1-.7.5-1.4 1.1-1.4 2.1V18c0 1.5.9 2.5 2.5 2.5s2.5-1 2.5-2.5v-4.2c0-1-.7-1.6-1.4-2.1.7-.5 1.4-1.1 1.4-2.1V6c0-1.5-.9-2.5-2.5-2.5z"/><path d="M17 3.5c-1.6 0-2.5 1-2.5 2.5v5.2c0 1 .7 1.6 1.4 2.1-.7.5-1.4 1.1-1.4 2.1V18c0 1.5.9 2.5 2.5 2.5s2.5-1 2.5-2.5v-2.6c0-1-.7-1.6-1.4-2.1.7-.5 1.4-1.1 1.4-2.1V6c0-1.5-.9-2.5-2.5-2.5z"/><path d="M4.5 7.5h5M4.5 16h5M14.5 8.5h5M14.5 17h5"/></svg></button>
-    <button id="cell-toggle" title="Karyocyte layout (K): the brain as one nucleated cell — lobes as chromosome territories in the nucleus, the hub as its nucleolus" aria-label="Toggle karyocyte layout" aria-pressed="false"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9.5"/><circle cx="12" cy="12" r="5"/><circle cx="12" cy="12" r="1.4" fill="currentColor" stroke="none"/><path d="M12 7v5M12 12l4.3 2.5M12 12l-4.3 2.5"/></svg></button>
-    <button id="tree-toggle" title="Family tree layout (F): the hub as the ancestor, each lobe a branch, neurons and sub-neurons the generations" aria-label="Toggle family tree layout" aria-pressed="false"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="5" cy="12" r="2.2"/><circle cx="19" cy="5.5" r="2.2"/><circle cx="19" cy="12" r="2.2"/><circle cx="19" cy="18.5" r="2.2"/><path d="M7.2 12h4.8M12 12V5.5h4.8M12 12h4.8M12 12v6.5h4.8"/></svg></button>
-    <button id="shot" title="Screenshot (S): save the current view as a PNG" aria-label="Save a screenshot"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 8h3l2-3h6l2 3h3a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V9a1 1 0 0 1 1-1z"/><circle cx="12" cy="13.5" r="3.5"/></svg></button>`;
-  document.getElementById('zoom-ctl').before(tools);
-  tools.querySelectorAll('.tool-mode').forEach(b => b.addEventListener('click', () => setMode(b.dataset.mode)));
+    <button id="release-pins" title="Release hand-placed neurons (R)" aria-label="Release hand-placed neurons">⟲</button>`);
+  railGroup('view-tools', 'View', `<button id="labels-toggle" title="Labels on/off (L): when off, only the neuron or lobe under the cursor keeps its label" aria-label="Toggle labels" aria-pressed="true">${ICON.labels}</button>
+    <button id="layout-menu" title="Layouts: neural, genome (G), karyocyte (K), family tree (F) or table (T)" aria-label="Choose a layout" aria-haspopup="menu" aria-expanded="false">${ICON.neural}</button>`);
+  railGroup('file-tools', 'File', `<button id="save-layout" title="Saved layouts (Ctrl+S): keep this arrangement in the browser, download it as a file or open one" aria-label="Saved layouts" aria-haspopup="dialog" aria-expanded="false">${ICON.save}</button>
+    <button id="shot" title="Screenshot (S): save the current view as a PNG" aria-label="Save a screenshot">${ICON.shot}</button>`);
+  const zoomCtl = document.getElementById('zoom-ctl'); zoomCtl.classList.add('rail-group'); zoomCtl.before(rail); rail.appendChild(zoomCtl);
+  // Brains: actions that place a brain on the canvas (Modifier Brain, Origin Brain …) live in their own group at the top of the rail, not in the
+  // Lobes panel. Add-on scripts call MINDBLOWN_RAIL.brainButton({ id, label, title, icon }) and get the button back; the group appears with its first button.
+  window.MINDBLOWN_RAIL = {
+    svg, rail,
+    brainButton({ id, label, title, icon }) {
+      let g = document.getElementById('brain-tools');
+      if (!g) { g = document.createElement('div'); g.id = 'brain-tools'; g.className = 'zoom-ctl rail-group'; g.setAttribute('role', 'group'); g.setAttribute('aria-label', 'Brains'); rail.prepend(g); }
+      const b = document.createElement('button'); b.type = 'button'; b.id = id; b.title = title || label; b.setAttribute('aria-label', label); if (icon) b.innerHTML = icon; else b.textContent = label;   // icon: authored SVG only; a label is text
+      g.appendChild(b); return b;
+    },
+    closeFlyout: () => hideFly(),   // an add-on panel opening beside the rail closes the rail's own flyout first
+  };
+  rail.querySelectorAll('.tool-mode').forEach(b => b.addEventListener('click', () => setMode(b.dataset.mode)));
   document.getElementById('release-pins').addEventListener('click', releaseAll);
+  // flyouts: one open at a time, beside the rail and level with the button that owns it; Esc, a click outside or the button again closes it
+  const stage = document.getElementById('stage');
+  let openFly = null;
+  function flyout(id, label, role) { const f = document.createElement('div'); f.id = id; f.className = 'flyout'; f.hidden = true; f.setAttribute('role', role); f.setAttribute('aria-label', label); stage.appendChild(f); return f; }
+  function showFly(f, btn) {
+    document.dispatchEvent(new CustomEvent('mindblown:flyout'));   // add-on panels beside the rail (Modifier Brain) step aside
+    if (openFly && openFly.f !== f) hideFly();
+    f.hidden = false; openFly = { f, btn }; btn.setAttribute('aria-expanded', 'true'); btn.classList.add('open');
+    const r = btn.getBoundingClientRect(), rr = rail.getBoundingClientRect();
+    f.style.right = (window.innerWidth - rr.left + 10) + 'px';
+    f.style.top = Math.max(72, Math.min(r.top - 6, window.innerHeight - f.offsetHeight - 12)) + 'px';
+  }
+  function hideFly() { if (!openFly) return; if (openFly.f.contains(document.activeElement)) openFly.btn.focus();   // focus leaves with the flyout, so the single-key shortcuts work again
+    openFly.f.hidden = true; openFly.btn.setAttribute('aria-expanded', 'false'); openFly.btn.classList.remove('open'); openFly = null; }
+  const toggleFly = (f, btn) => (openFly && openFly.f === f ? hideFly() : showFly(f, btn));
+  document.addEventListener('pointerdown', e => { if (openFly && !openFly.f.contains(e.target) && !openFly.btn.contains(e.target)) hideFly(); }, true);
+  window.addEventListener('keydown', e => { if (e.key === 'Escape' && openFly) { hideFly(); } });
+  window.addEventListener('resize', () => { if (openFly) showFly(openFly.f, openFly.btn); });
+  // layouts flyout: every layout as a row (icon, name, what it shows, key); the rail button wears the current layout's icon
+  const LAYOUT_ROWS = [
+    ['neural', 'neural-toggle', 'Neural', 'force-directed: lobes, neurons and synapses find their own places', ''],
+    ['genome', 'layout-toggle', 'Genome', 'a karyogram: lobes or brains as chromosomes, neurons as bands', 'G'],
+    ['cell', 'cell-toggle', 'Karyocyte', 'one cell: lobes as territories in the nucleus, the hub as nucleolus', 'K'],
+    ['tree', 'tree-toggle', 'Family tree', 'the hub as ancestor, each lobe a branch, neurons the generations', 'F'],
+    ['table', 'table-toggle', 'Table', 'a round table with no head: lobes as seats, neurons as chairs', 'T'],
+  ];
+  const layFly = flyout('layout-flyout', 'Layouts', 'menu');
+  layFly.innerHTML = `<div class="fly-head">Layouts</div>` + LAYOUT_ROWS.map(([l, id, name, what, key]) => `<button class="fly-row lay" id="${id}" data-layout="${l}" role="menuitemradio" aria-checked="false" aria-pressed="false">${ICON[l]}<span class="fly-text"><b>${name}</b><small>${what}</small></span>${key ? `<kbd>${key}</kbd>` : ''}</button>`).join('');
+  const layoutMenuBtn = document.getElementById('layout-menu');
+  layoutMenuBtn.addEventListener('click', () => toggleFly(layFly, layoutMenuBtn));
   // labels toggle: a tool button and a switch in the lobes panel drive the same state
   const switches = document.querySelector('#lobes .switches');
   if (switches) {
-    [['layout-tree', 'Family tree layout'], ['layout-cell', 'Karyocyte layout'], ['layout-genome', 'Genome layout']].forEach(([id, name]) => { const g = document.createElement('label'); g.className = 'switch'; g.innerHTML = `<input type="checkbox" id="${id}"><span>${name}</span>`; switches.prepend(g); });
+    [['layout-table', 'Table layout'], ['layout-tree', 'Family tree layout'], ['layout-cell', 'Karyocyte layout'], ['layout-genome', 'Genome layout']].forEach(([id, name]) => { const g = document.createElement('label'); g.className = 'switch'; g.innerHTML = `<input type="checkbox" id="${id}"><span>${name}</span>`; switches.prepend(g); });
     const l = document.createElement('label'); l.className = 'switch'; l.innerHTML = '<input type="checkbox" id="labels" checked><span>Labels</span>'; switches.prepend(l);
   }
   // layout switch: a tool button, a switch in the lobes panel and a key drive the same state per map; the hash carries it so a link can open a map
@@ -1330,19 +1577,27 @@ ctx.shadowBlur=0;});
     genome: { btn: 'layout-toggle', sw: 'layout-genome', key: 'G', flash: 'genome layout · chromosomes are lobes, bands are neurons, the hub sits at the centromere', noun: 'chromosomes', one: 'chromosome', unit: 'band', hint: 'genome layout · each bar is a lobe, each band a neuron' },
     cell: { btn: 'cell-toggle', sw: 'layout-cell', key: 'K', flash: 'karyocyte layout · the brain is one cell: lobes are territories in the nucleus, the hub its nucleolus', noun: 'cells', one: 'cell', unit: 'neuron', hint: 'karyocyte layout · the nucleus holds the lobes as territories, the hub is the nucleolus' },
     tree: { btn: 'tree-toggle', sw: 'layout-tree', key: 'F', flash: 'family tree layout · the hub is the ancestor, each lobe a branch, neurons and sub-neurons the generations', noun: 'branches', one: 'branch', unit: 'neuron', hint: 'family tree layout · the hub is the ancestor, each plate a lobe, each row a neuron' },
+    table: { btn: 'table-toggle', sw: 'layout-table', key: 'T', flash: 'table layout · a round table with no head · seats are lobes, chairs are neurons, synapses lie on the table', noun: 'seats', one: 'seat', unit: 'chair', hint: 'table layout · each seat is a lobe, each chair a neuron, nobody sits at the head' },
   };
+  // the rail button, the flyout rows and the lobes-panel switches all show the same layout
+  function syncLayoutUI() {
+    Object.entries(LAYOUT_UI).forEach(([id, u]) => { const on = layout === id, b = document.getElementById(u.btn); if (b) { b.classList.toggle('on', on); b.setAttribute('aria-pressed', String(on)); } const c = document.getElementById(u.sw); if (c) c.checked = on; });
+    const nb = document.getElementById('neural-toggle'); if (nb) { nb.classList.toggle('on', !mapped()); nb.setAttribute('aria-pressed', String(!mapped())); }
+    layFly.querySelectorAll('.lay').forEach(b => b.setAttribute('aria-checked', b.getAttribute('aria-pressed')));
+    layoutMenuBtn.innerHTML = ICON[layout]; layoutMenuBtn.classList.toggle('on', mapped()); layoutMenuBtn.title = `Layouts: ${mapped() ? LAYOUT_UI[layout].one.replace(/^\w/, c => c.toUpperCase()) + ' map' : 'neural'} now · G, K, F or T jump to a map`;
+  }
   let layoutFitTimer;
   function setLayout(l, opts = {}) {
     if (!LAYOUTS.includes(l)) return;
     const changed = l !== layout; layout = l;
-    Object.entries(LAYOUT_UI).forEach(([id, u]) => { const on = layout === id, b = document.getElementById(u.btn); if (b) { b.classList.toggle('on', on); b.setAttribute('aria-pressed', String(on)); } const c = document.getElementById(u.sw); if (c) c.checked = on; });
+    syncLayoutUI();
     if (!changed) return;
     clearTimeout(layoutFitTimer);
     // hand-placed pins would fight the loci, so both directions start from free neurons; the selected neuron keeps its pin in the neural layout
     pages.forEach(n => { n.pinned = false; n.fx = null; n.fy = null; });
     if (mapped()) relayout(false); else if (selected && selected.kind === 'page' && !isChild(selected)) { selected.fx = selected.x; selected.fy = selected.y; }
     refreshForces(); rebuild(false); sim.alpha(0.9).restart();
-    if (history.replaceState) { const h = location.hash.replace(/[#&]layout=\w+\b/g, '').replace(/^&/, '#'); try { history.replaceState(null, '', (mapped() ? (h.length > 1 ? h + '&' : '#') + 'layout=' + layout : h) || location.pathname + location.search); } catch (_) { /* Opaque preview: layout still works. */ } }
+    if (history.replaceState) { const h = location.hash.replace(/[#&]layout=\w+\b/g, '').replace(/^&/, '#'); try { history.replaceState(null, '', (layout !== pageLayout ? (h.length > 1 ? h + '&' : '#') + 'layout=' + layout : h) || location.pathname + location.search); } catch (_) { /* Opaque preview: layout still works. */ } }   // the hash carries the layout only when it differs from the page default, so neural survives a reload on a map-default page
     if (!opts.silent) {
       flash(mapped() ? LAYOUT_UI[layout].flash : 'neural layout');
       if (!opts.noFit) {
@@ -1355,20 +1610,43 @@ ctx.shadowBlur=0;});
     updateHint();
   }
   const toggleLayout = l => setLayout(layout === l ? 'neural' : l);
-  Object.entries(LAYOUT_UI).forEach(([id, u]) => {
-    document.getElementById(u.btn)?.addEventListener('click', () => toggleLayout(id));
-    document.getElementById(u.sw)?.addEventListener('change', e => setLayout(e.target.checked ? id : 'neural'));
-  });
-  if (mapped()) setLayout(layout, { silent: true });   // initial state from MINDBLOWN_OPTIONS or the hash, without the toast
-  function setLabels(on) {
+  layFly.querySelectorAll('.lay').forEach(b => b.addEventListener('click', () => { setLayout(b.dataset.layout); hideFly(); }));
+  Object.entries(LAYOUT_UI).forEach(([id, u]) => document.getElementById(u.sw)?.addEventListener('change', e => setLayout(e.target.checked ? id : 'neural')));
+  if (mapped()) setLayout(layout, { silent: true }); else syncLayoutUI();   // initial state from MINDBLOWN_OPTIONS or the hash, without the toast
+  function setLabels(on, quiet) {
     labelsOn = on;
     const b = document.getElementById('labels-toggle'); b.classList.toggle('off', !on); b.setAttribute('aria-pressed', String(on));
     const c = document.getElementById('labels'); if (c) c.checked = on;
-    flash(on ? 'labels on' : 'labels off · hover a neuron or lobe to read it');
+    if (!quiet) flash(on ? 'labels on' : 'labels off · hover a neuron or lobe to read it');
   }
   if (!labelsOn) { const b = document.getElementById('labels-toggle'); b.classList.add('off'); b.setAttribute('aria-pressed', 'false'); const c = document.getElementById('labels'); if (c) c.checked = false; }   // initial state from MINDBLOWN_OPTIONS, without the toast
   document.getElementById('labels-toggle').addEventListener('click', () => setLabels(!labelsOn));
   document.getElementById('labels')?.addEventListener('change', e => setLabels(e.target.checked));
+  // ---------- files: the user chooses where a download goes when the browser allows it ----------
+  // Chromium offers showSaveFilePicker (a real Save As dialog, so the user picks the folder and name); elsewhere, and inside sandboxed
+  // previews where the picker is refused, a plain download goes to the browser's download folder. Returns the saved name, or null when
+  // the user cancelled.
+  const canPick = () => window.isSecureContext && window.self === window.top;
+  async function saveBlob(blob, name, desc, mime, ext) {
+    if (canPick() && typeof window.showSaveFilePicker === 'function') {
+      try {
+        const h = await window.showSaveFilePicker({ suggestedName: name, types: [{ description: desc, accept: { [mime]: [ext] } }] });
+        const w = await h.createWritable(); await w.write(blob); await w.close(); return h.name || name;
+      } catch (e) { if (e && e.name === 'AbortError') return null; }   // any other refusal (policy, origin): fall back to a plain download
+    }
+    const url = URL.createObjectURL(blob), a = document.createElement('a'); a.href = url; a.download = name; document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 4000); return name;
+  }
+  async function pickFile(desc, mime, ext) {
+    if (canPick() && typeof window.showOpenFilePicker === 'function') {
+      try { const [h] = await window.showOpenFilePicker({ multiple: false, types: [{ description: desc, accept: { [mime]: [ext] } }] }); return h ? await h.getFile() : null; }
+      catch (e) { if (e && e.name === 'AbortError') return null; }
+    }
+    return new Promise(res => { const i = document.createElement('input'); i.type = 'file'; i.accept = `${ext},${mime}`; i.addEventListener('change', () => res(i.files && i.files[0] || null)); i.addEventListener('cancel', () => res(null)); i.click(); });
+  }
+  const fileStamp = () => new Date().toISOString().slice(0, 16).replace(/[-:T]/g, '').replace(/^(\d{8})(\d{4})$/, '$1-$2');
+  const slug = s => String(s).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'brain';
+  const brainTitle = () => (document.querySelector('.brand .title') || {}).textContent || D.title || 'MindBlown';
   // screenshot: the canvas on the page background, with a small caption; saved as PNG
   function screenshot() {
     const out = document.createElement('canvas'); out.width = canvas.width; out.height = canvas.height;
@@ -1376,20 +1654,126 @@ ctx.shadowBlur=0;});
     const g = o.createRadialGradient(out.width / 2, out.height * 0.45, 0, out.width / 2, out.height * 0.45, Math.max(out.width, out.height) * 0.7);
     g.addColorStop(0, '#0e1322'); g.addColorStop(1, '#06080f'); o.fillStyle = g; o.fillRect(0, 0, out.width, out.height);
     o.drawImage(canvas, 0, 0);
-    const title = (document.querySelector('.brand .title') || {}).textContent || 'MindBlown';
+    const title = brainTitle();
     o.setTransform(dpr, 0, 0, dpr, 0, 0); o.textBaseline = 'alphabetic'; o.textAlign = 'left';
     o.font = `500 ${12}px 'Satoshi', sans-serif`; o.fillStyle = 'rgba(167,178,204,0.85)';
     o.fillText(`${title} · ${levelText.textContent} · ${new Date().toISOString().slice(0, 10)}`, 16, H - 14);
-    const stamp = new Date().toISOString().slice(0, 16).replace(/[-:T]/g, '').replace(/^(\d{8})(\d{4})$/, '$1-$2');
-    const name = `${title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')}-${stamp}.png`;
+    const name = `${slug(title)}-${fileStamp()}.png`;
     out.toBlob(blob => {
       if (!blob) { flash('screenshot failed'); return; }
-      const url = URL.createObjectURL(blob), a = document.createElement('a'); a.href = url; a.download = name; document.body.appendChild(a); a.click(); a.remove();
-      setTimeout(() => URL.revokeObjectURL(url), 4000); flash(`saved ${name}`);
+      saveBlob(blob, name, 'PNG image', 'image/png', '.png').then(saved => flash(saved ? `saved ${saved}` : 'screenshot cancelled'));
     }, 'image/png');
   }
   document.getElementById('shot').addEventListener('click', screenshot);
   window.addEventListener('keydown', e => { if ((e.key === 's' || e.key === 'S') && !e.target.closest('input') && !e.metaKey && !e.ctrlKey) screenshot(); });
+
+  // ---------- saved layouts ----------
+  // A layout is the arrangement the user made of this brain: the layout mode, every neuron's place (and which are pinned), hand-moved
+  // map groups, the lobes that are on, labels / explode / shared-source switches, the tool mode, the camera and the open neuron. Layouts
+  // are kept in this browser (localStorage, per brain) and can be downloaded as `.mindblown-layout.json` or opened from such a file.
+  // Nothing leaves the browser. A file names its brain so one saved from another brain is refused rather than scrambling this one.
+  const LAYOUT_FORMAT = 'mindblown-layout/1';
+  const layoutStoreKey = 'mindblown.layouts.' + (D.title || 'brain') + '|' + location.pathname;
+  const isLayout = s => !!s && typeof s === 'object' && s.format === LAYOUT_FORMAT && typeof s.name === 'string' && LAYOUTS.includes(s.layout) && s.positions && typeof s.positions === 'object';
+  const num = (v, d = 0) => (typeof v === 'number' && isFinite(v) ? v : d);
+  const pair = v => (Array.isArray(v) && v.length === 2 ? [num(v[0]), num(v[1])] : null);
+  const ownPage = id => (typeof id === 'string' && Object.prototype.hasOwnProperty.call(pageById, id) && pageById[id].kind === 'page' ? pageById[id] : null);   // file ids like __proto__ never reach a page lookup
+  const point = v => (Array.isArray(v) && v.length === 2 && Number.isFinite(v[0]) && Number.isFinite(v[1]) ? [v[0], v[1]] : null);   // positions must be real numbers; offsets fall back to 0 via pair()
+  function readLayouts() { try { const v = JSON.parse(localStorage.getItem(layoutStoreKey) || '[]'); return Array.isArray(v) ? v.filter(isLayout) : []; } catch { return []; } }
+  function writeLayouts(list) { try { localStorage.setItem(layoutStoreKey, JSON.stringify(list)); return true; } catch { return false; } }
+  function captureLayout(name) {
+    const positions = {}; pages.forEach(p => { positions[p.id] = [Math.round(p.x * 10) / 10, Math.round(p.y * 10) / 10]; });
+    const groups = {}; groupsNow().forEach(g => { if (g.ox || g.oy) groups[g.id] = [g.ox, g.oy]; });
+    const loose = {}; pages.forEach(p => { if (p.gox || p.goy) loose[p.id] = [p.gox, p.goy]; });
+    return {
+      format: LAYOUT_FORMAT, name, savedAt: new Date().toISOString(),
+      brain: { title: D.title || brainTitle(), path: location.pathname, center: D.center || null, built: D.built || null, neurons: pages.length },
+      layout, view: { k, cx: (W / 2 - tx) / k, cy: (H / 2 - ty) / k },   // the camera as a world point and scale, so it survives a different window size
+      lobes: { ...lobeOn }, labels: labelsOn, explode: forceExplode, cocite: showCocite, mode,
+      positions, pins: pages.filter(p => p.pinned).map(p => p.id), groups, loose,
+      selected: selected && selected.kind === 'page' ? selected.id : null,
+    };
+  }
+  function applyLayout(s) {
+    if (!isLayout(s)) { flash('that is not a MindBlown layout'); return false; }
+    // the same brain means the same title and centre; a layout without them (hand-made) falls back on the position overlap alone
+    const sb = s.brain && typeof s.brain === 'object' ? s.brain : {};
+    if ((sb.title && sb.title !== (D.title || brainTitle())) || (sb.center && D.center && sb.center !== D.center)) { flash(`that layout belongs to another brain${sb.title ? ` (${sb.title})` : ''}`); return false; }
+    const known = pages.filter(p => point(s.positions[p.id])).length;   // an older build of this brain still has most of its neurons
+    if (known < Math.max(1, pages.length * 0.5)) { flash(`that layout belongs to another brain${s.brain && s.brain.title ? ` (${s.brain.title})` : ''}`); return false; }
+    clearSelection(); multi.clear(); marquee = null;
+    if (s.lobes && typeof s.lobes === 'object') lobes.forEach(l => { if (typeof s.lobes[l.id] === 'boolean') lobeOn[l.id] = s.lobes[l.id]; });
+    renderLobeList();
+    if (typeof s.labels === 'boolean') setLabels(s.labels, true);
+    forceExplode = !!s.explode; document.getElementById('explode-all').checked = forceExplode;
+    showCocite = !!s.cocite; document.getElementById('cocite').checked = showCocite;
+    if (s.mode === 'pan' || s.mode === 'select') setMode(s.mode);
+    setLayout(s.layout, { silent: true, noFit: true });   // releases every pin and lays the map out fresh; the saved places go on top
+    pages.forEach(p => { p.pinned = false; p.fx = null; p.fy = null; const q = point(s.positions[p.id]); if (q) { p.x = q[0]; p.y = q[1]; p.vx = p.vy = 0; } });
+    syns.forEach(n => { const p = pageById[n.page]; n.x = p.x + (Math.random() - 0.5) * 4; n.y = p.y + (Math.random() - 0.5) * 4; n.vx = n.vy = 0; });
+    srcs.forEach(n => { const p = n.pageNodes[0]; n.x = p.x + (Math.random() - 0.5) * 4; n.y = p.y + (Math.random() - 0.5) * 4; n.vx = n.vy = 0; });
+    if (mapped()) {
+      groupsNow().forEach(g => { const o = s.groups && pair(s.groups[g.id]); g.ox = o ? o[0] : 0; g.oy = o ? o[1] : 0; });
+      pages.forEach(p => { const o = s.loose && pair(s.loose[p.id]); p.gox = o ? o[0] : 0; p.goy = o ? o[1] : 0; });
+      relayout(false);
+    } else (Array.isArray(s.pins) ? s.pins : []).forEach(id => { const p = ownPage(id); if (p && !isChild(p)) { p.pinned = true; p.fx = p.x; p.fy = p.y; } });
+    refreshForces(); rebuild(false); sim.alpha(mapped() ? 0.5 : 0.12);   // the free layout was an equilibrium when saved, so a gentle restart keeps it
+    const kk = Math.min(9, Math.max(0.08, num(s.view && s.view.k, 0)));
+    if (kk > 0 && s.view) d3.select(canvas).transition().duration(700).ease(d3.easeCubicInOut).call(zoom.transform, d3.zoomIdentity.translate(W / 2 - num(s.view.cx) * kk, H / 2 - num(s.view.cy) * kk).scale(kk));
+    const sel = ownPage(s.selected); if (sel && visible(sel)) select(sel, { noZoom: true });
+    updateLevel(); updateHint(); updateStats();
+    return true;
+  }
+  const whenText = iso => { const d = new Date(iso); return isNaN(d) ? '' : d.toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }); };
+  const layoutName = l => { const r = LAYOUT_ROWS.find(x => x[0] === l); return r ? r[2] : l; };
+  const saveFly = flyout('layouts-flyout', 'Saved layouts', 'dialog');
+  saveFly.innerHTML = `<div class="fly-head">Saved layouts <span class="n" id="layouts-count"></span></div>
+    <form class="fly-save" id="layout-save-form"><input id="layout-name" type="text" maxlength="60" autocomplete="off" placeholder="Name this arrangement" aria-label="Layout name"><button type="submit" class="fly-btn primary" title="Keep this arrangement in this browser (Ctrl+S)">Save</button></form>
+    <ul class="fly-list" id="layouts-list"></ul>
+    <div class="fly-foot"><button type="button" class="fly-btn" id="layout-open">${ICON.open}<span>Open file…</span></button><button type="button" class="fly-btn" id="layout-download" title="Download the current arrangement as a file (Ctrl+Shift+S)">${ICON.down}<span>Download current</span></button></div>
+    <div class="fly-note">Kept in this browser only · a file keeps it anywhere</div>`;
+  const saveBtn = document.getElementById('save-layout'), nameInput = document.getElementById('layout-name'), layoutsList = document.getElementById('layouts-list');
+  function renderLayouts() {
+    const list = readLayouts();
+    document.getElementById('layouts-count').textContent = list.length ? String(list.length) : '';
+    layoutsList.innerHTML = list.length ? list.map((s, i) => `<li><button type="button" class="fly-row apply" data-i="${i}" title="Apply this layout">${ICON[s.layout] || ICON.neural}<span class="fly-text"><b>${esc(s.name)}</b><small>${esc(layoutName(s.layout))} layout · ${esc(whenText(s.savedAt))}</small></span></button><button type="button" class="fly-mini" data-dl="${i}" title="Download as a file" aria-label="Download ${esc(s.name)}">${ICON.down}</button><button type="button" class="fly-mini" data-del="${i}" title="Delete" aria-label="Delete ${esc(s.name)}">×</button></li>`).join('')
+      : '<li class="fly-empty">Nothing saved for this brain yet. Arrange it, name it and press Save.</li>';
+    nameInput.placeholder = `Layout ${list.length + 1}`;
+  }
+  const layoutFile = s => new Blob([JSON.stringify(s, null, 1)], { type: 'application/json' });
+  const layoutFileName = s => `${slug(brainTitle())}-${slug(s.name)}.mindblown-layout.json`;
+  function saveLayout(name) {
+    const list = readLayouts(), s = captureLayout((name || '').trim() || `Layout ${list.length + 1}`);
+    const at = list.findIndex(x => x.name === s.name); if (at >= 0) list[at] = s; else list.push(s);   // the same name replaces, so a working layout can be re-saved
+    if (!writeLayouts(list)) { flash('this browser refused to store the layout · download it instead'); return null; }
+    renderLayouts(); nameInput.value = ''; flash(`saved layout “${s.name}” in this browser${at >= 0 ? ' (replaced)' : ''}`); return s;
+  }
+  async function downloadLayout(s) { const saved = await saveBlob(layoutFile(s), layoutFileName(s), 'MindBlown layout', 'application/json', '.json'); flash(saved ? `saved ${saved}` : 'download cancelled'); }
+  async function openLayoutFile() {
+    const f = await pickFile('MindBlown layout', 'application/json', '.json'); if (!f) return;
+    let s = null; try { s = JSON.parse(await f.text()); } catch { flash('could not read that file as a layout'); return; }
+    if (!applyLayout(s)) return;
+    const list = readLayouts(); let kept = true;
+    if (!list.some(x => x.name === s.name && x.savedAt === s.savedAt)) { list.push(s); kept = writeLayouts(list); }   // an opened file joins the browser's list so it is one click away next time
+    renderLayouts(); flash(kept ? `opened layout “${s.name}”` : `opened layout “${s.name}” · this browser refused to keep it, so open the file again next time`);
+  }
+  saveBtn.addEventListener('click', () => { renderLayouts(); toggleFly(saveFly, saveBtn); if (!saveFly.hidden) nameInput.focus(); });
+  document.getElementById('layout-save-form').addEventListener('submit', e => { e.preventDefault(); saveLayout(nameInput.value); });
+  document.getElementById('layout-open').addEventListener('click', openLayoutFile);
+  document.getElementById('layout-download').addEventListener('click', () => downloadLayout(captureLayout((nameInput.value || '').trim() || `Layout ${fileStamp()}`)));
+  layoutsList.addEventListener('click', e => {
+    const b = e.target.closest('button'); if (!b) return; const list = readLayouts();
+    if (b.dataset.i !== undefined) { const s = list[+b.dataset.i]; if (s && applyLayout(s)) { hideFly(); flash(`layout “${s.name}”`); } }
+    else if (b.dataset.dl !== undefined) { const s = list[+b.dataset.dl]; if (s) downloadLayout(s); }
+    else if (b.dataset.del !== undefined) { const s = list[+b.dataset.del]; list.splice(+b.dataset.del, 1); writeLayouts(list); renderLayouts(); if (s) flash(`deleted “${s.name}”`); }
+  });
+  // Ctrl/Cmd+S opens the saved layouts (a second press, or Enter, saves); Ctrl/Cmd+Shift+S downloads the current arrangement; Ctrl/Cmd+O opens a file
+  window.addEventListener('keydown', e => {
+    if (!(e.ctrlKey || e.metaKey) || e.altKey) return;
+    if (e.key === 's' || e.key === 'S') { e.preventDefault(); if (e.shiftKey) downloadLayout(captureLayout(`Layout ${fileStamp()}`)); else if (openFly && openFly.f === saveFly) saveLayout(nameInput.value); else { renderLayouts(); showFly(saveFly, saveBtn); nameInput.focus(); } }
+    else if (e.key === 'o' || e.key === 'O') { e.preventDefault(); openLayoutFile(); }
+  });
+  renderLayouts();
   // a short message in the level pill's hint slot
   let flashT = 0;
   function flash(msg) { hint.textContent = msg; clearTimeout(flashT); flashT = setTimeout(() => updateHint(), 2200); }
@@ -1410,13 +1794,13 @@ ctx.shadowBlur=0;});
     if (pinned && lvl === 'Lobes') { hint.textContent = `${plural(pinned, 'neuron')} placed by hand · R releases them`; return; }
     const u = mapped() ? LAYOUT_UI[layout] : null;
     if (u && mapMoved() && lvl === 'Lobes') { hint.textContent = `${u.noun} moved by hand · drag a ${u.unit} to move its whole ${u.one} · R resets the map`; return; }
-    if (lvl === 'Lobes') { hint.textContent = u ? `${u.hint} · drag a ${u.unit} to move its ${u.one} · ${u.key} returns to the neural layout` : mode === 'select' ? 'scroll to zoom · drag to select · mouse3 or Space to pan · drag a neuron to move it · G, K or F for the genome, karyocyte or family tree layout' : 'scroll to zoom · drag to pan · click a neuron · V for select mode · G, K or F for the genome, karyocyte or family tree layout'; return; }
+    if (lvl === 'Lobes') { hint.textContent = u ? `${u.hint} · drag a ${u.unit} to move its ${u.one} · ${u.key} returns to the neural layout` : mode === 'select' ? 'scroll to zoom · drag to select · mouse3 or Space to pan · drag a neuron to move it · G, K, F or T for the genome, karyocyte, family tree or table layout' : 'scroll to zoom · drag to pan · click a neuron · V for select mode · G, K, F or T for the genome, karyocyte, family tree or table layout'; return; }
     hint.textContent = lvl === 'Lobes' ? 'scroll to zoom · drag to pan · click a neuron' : lvl === 'Neurons' ? (hasSubs ? 'keep zooming: sub-neurons unfold at 0.85×, synapses at 1.5×' : 'keep zooming: synapses explode at 1.5×') : lvl === 'Sub-neurons' ? 'small satellites are sub-neurons · zoom past 1.5× to explode synapses' : 'dots are synapses · diamonds are sources · dashed lines fire across neurons';
   }
   function updateStats() {
     const vp = pages.filter(visible);
     const subs = vp.filter(isChild).length;
-    document.getElementById('stats').innerHTML = `<b>${vp.length - subs}</b> ${pw(vp.length - subs, 'neuron')}${subs ? ` · <b>${subs}</b> ${pw(subs, 'sub-neuron')}` : ''} · <b>${d3.sum(vp, p => p.nSyn)}</b> ${pw(d3.sum(vp, p => p.nSyn), 'synapse')}<br><b>${activeLinks.filter(l => l.kind === 'pp').length}</b> ${pw(activeLinks.filter(l => l.kind === 'pp').length, 'connection')} · <b>${srcs.filter(visible).length}</b> ${pw(srcs.filter(visible).length, 'source')}`;
+    document.getElementById('stats').innerHTML = `<b>${vp.length - subs}</b> ${pw(vp.length - subs, 'neuron')}${subs ? ` · <b>${subs}</b> ${pw(subs, 'sub-neuron')}` : ''} · <b>${d3.sum(vp, p => p.nSyn)}</b> ${pw(d3.sum(vp, p => p.nSyn), 'synapse')}${(() => { const m = syns.filter(s => sealed(s) && pageOn(pageById[s.page])).length; return m ? ` · <b>${m}</b> sealed` : ''; })()}<br><b>${activeLinks.filter(l => l.kind === 'pp').length}</b> ${pw(activeLinks.filter(l => l.kind === 'pp').length, 'connection')} · <b>${srcs.filter(visible).length}</b> ${pw(srcs.filter(visible).length, 'source')}`;
   }
 
   // ---------- search ----------
@@ -1428,12 +1812,15 @@ ctx.shadowBlur=0;});
     if (term.length < 2) { hideResults(); return; }
     const hits = [];
     pages.forEach(p => { const t = p.title.toLowerCase(); if (t.includes(term)) hits.push({ n: p, score: (t === term ? 0 : t.startsWith(term) ? 1 : 2) + t.length / 1000 }); else if ((p.desc || '').toLowerCase().includes(term)) hits.push({ n: p, score: 5 }); });
-    syns.forEach(s => { const l = s.lead.toLowerCase(); if (l.includes(term)) hits.push({ n: s, score: 3 }); else if (s.text.toLowerCase().includes(term)) hits.push({ n: s, score: 6 }); });
+    syns.forEach(s => {
+      if (sealed(s)) { if (s.puzzle.q.toLowerCase().includes(term)) hits.push({ n: s, score: 6 }); return; }   // a sealed fact cannot be found by its contents
+      const l = s.lead.toLowerCase(); if (l.includes(term)) hits.push({ n: s, score: 3 }); else if (s.text.toLowerCase().includes(term)) hits.push({ n: s, score: 6 });
+    });
     hits.sort((a, b) => a.score - b.score);
     resultItems = hits.slice(0, 9).map(h => h.n);
     results.innerHTML = resultItems.length ? resultItems.map(n => n.kind === 'page'
       ? `<li role="option"><span class="sw" style="background:${lobeColor(n)}"></span><span><span class="rt">${esc(n.title)}</span><span class="rs">${isChild(n) ? 'sub-neuron of ' + esc(n.parent.title) : typeName(n) + ' · ' + esc(lobeById[n.lobe].name)} · ${n.nSyn} synapses</span></span></li>`
-      : `<li role="option"><span class="sw" style="background:${lobeColor(n)};opacity:.6"></span><span><span class="rt">${esc(n.lead)}</span><span class="rs">synapse of ${esc(pageById[n.page].title)}</span></span></li>`).join('')
+      : `<li role="option"><span class="sw" style="background:${lobeColor(n)};opacity:.6"></span><span><span class="rt">${esc(leadOf(n))}</span><span class="rs">synapse of ${esc(pageById[n.page].title)}</span></span></li>`).join('')
       : `<li><span class="empty">Nothing fires for “${esc(q.value)}”</span></li>`;
     results.hidden = false; activeIdx = -1;
     results.querySelectorAll('li[role=option]').forEach((li, i) => li.addEventListener('click', () => choose(i)));
@@ -1474,5 +1861,5 @@ ctx.shadowBlur=0;});
     focus: id => { const n=pageById[id]; if(n) {ensureVisible(n);select(n);} },
     selected: () => selected?.kind === 'page' ? selected.id : null
   });
-  window.MINDBLOWN_QA = { screenOf: id => { const n = pageById[id]; return n ? toScreen(n.x, n.y) : null; }, selection: () => [...multi].map(n => n.id), pinned: () => pages.filter(n => n.pinned).map(n => n.id), mode: () => mode, labels: () => labelsOn, layout: () => layout, setLayout: l => setLayout(l, { noFit: true }), chromosomes: () => chromos.filter(c => c.on).map(c => ({ id: c.id, x: c.x, top: c.top, bot: c.bot, loci: c.loci.map(p => p.id), hub: c.hubOn ? c.hubOn.id : null })), groups: () => groupsNow().filter(g => g.on).map(g => ({ id: g.id, loci: g.loci.map(p => p.id), hub: g.hubOn ? g.hubOn.id : null, ox: g.ox || 0, oy: g.oy || 0 })), cells: () => cells.filter(c => c.on).map(c => ({ id: c.id, cx: c.cx, cy: c.cy, Rn: c.Rn, Rc: c.Rc })), trees: () => trees.filter(t => t.on).map(t => ({ id: t.id, x: t.x, y: t.y, w: t.w, h: t.h })), screenshot };
+  window.MINDBLOWN_QA = { screenOf: id => { const n = pageById[id]; return n ? toScreen(n.x, n.y) : null; }, selection: () => [...multi].map(n => n.id), pinned: () => pages.filter(n => n.pinned).map(n => n.id), mode: () => mode, labels: () => labelsOn, layout: () => layout, setLayout: l => setLayout(l, { noFit: true }), chromosomes: () => chromos.filter(c => c.on).map(c => ({ id: c.id, x: c.x, top: c.top, bot: c.bot, loci: c.loci.map(p => p.id), hub: c.hubOn ? c.hubOn.id : null })), groups: () => groupsNow().filter(g => g.on).map(g => ({ id: g.id, loci: g.loci.map(p => p.id), hub: g.hubOn ? g.hubOn.id : null, ox: g.ox || 0, oy: g.oy || 0 })), cells: () => cells.filter(c => c.on).map(c => ({ id: c.id, cx: c.cx, cy: c.cy, Rn: c.Rn, Rc: c.Rc })), seats: () => seats.filter(c => c.on).map(c => ({ id: c.id, a0: c.a0, a1: c.a1, loci: c.loci.map(p => p.id) })), tableR: () => tableR, trees: () => trees.filter(t => t.on).map(t => ({ id: t.id, x: t.x, y: t.y, w: t.w, h: t.h })), sealed: () => syns.filter(sealed).map(s => s.id), solve: (id, text) => !!synById[id] && solve(synById[id], text), screenshot, captureLayout, applyLayout, layouts: readLayouts, saveLayout, flyout: () => (openFly ? openFly.f.id : null) };
 })();

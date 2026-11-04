@@ -61,6 +61,7 @@ const fs = require('fs');
   await p.click('#labels');
 
   // 4. screenshot button downloads a PNG
+  await p.evaluate(() => { window.showSaveFilePicker = undefined; });   // the Save As dialog cannot be driven headless; test the download fallback
   const [dl] = await Promise.all([p.waitForEvent('download', { timeout: 8000 }).catch(() => null), p.click('#shot')]);
   if (!dl) errs.push('no download from #shot'); else {
     const path = await dl.path(); const size = fs.statSync(path).size;
@@ -71,10 +72,12 @@ const fs = require('fs');
   const hint = await p.textContent('#hint'); console.log('hint:', hint.trim());
 
   // 5. tools stack vs zoom controls
-  const col = await p.evaluate(() => { const a = document.querySelector('.zoom-ctl.tools').getBoundingClientRect(), z = document.querySelector('.zoom-ctl:not(.tools)').getBoundingClientRect(); return { toolsBottom: Math.round(a.bottom), zoomTop: Math.round(z.top), toolsTop: Math.round(a.top) }; });
-  console.log('tools/zoom:', col);
-  if (col.toolsBottom > col.zoomTop) errs.push('tools stack overlaps zoom controls');
-  if (col.toolsTop < 0) errs.push('tools stack runs off the top');
+  // the right rail stacks its groups (Tools, View, File, Zoom); none may overlap the next or leave the window
+  const col = await p.evaluate(() => [...document.querySelectorAll('#rail .zoom-ctl')].map(g => { const r = g.getBoundingClientRect(); return { id: g.id, top: Math.round(r.top), bottom: Math.round(r.bottom) }; }));
+  console.log('rail groups:', JSON.stringify(col));
+  if (!col.length) errs.push('no rail groups');
+  col.forEach((g, i) => { if (i && col[i - 1].bottom > g.top) errs.push(`${col[i - 1].id} overlaps ${g.id}`); });
+  if (col.length && (col[0].top < 0 || col[col.length - 1].bottom > 600)) errs.push('rail runs off the window');
 
   // 6. mobile: dropdown present, labels switch in lobes panel
   await p.setViewportSize({ width: 390, height: 844 }); await p.waitForTimeout(600);

@@ -113,6 +113,7 @@
     const size = btn.offsetWidth || 56, W = window.innerWidth, H = window.innerHeight;
     let cx, bottom;
     if (r && r.width > 0 && r.top > size + 70) { cx = r.left + r.width / 2; bottom = r.top - 12; }
+    else if (r && r.width > 0 && W > 900) { cx = r.left - 12 - size / 2; bottom = r.top + size; }   // a short window: no room above the rail, so beside its top
     else { cx = W - (W <= 900 ? 16 : 24) - size / 2; bottom = H - (W <= 900 ? 16 : 24) - (parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--mbar-h')) || 0); }   // no zoom column (network overviews): the usual floating-button corner, above a phone options bar if there is one
     const clampL = x => Math.round(Math.min(W - size - 8, Math.max(8, x)));
     const mine = e => e === btn || btn.contains(e) || e === out || e === toastEl || (toastEl && toastEl.contains(e));
