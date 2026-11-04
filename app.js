@@ -547,7 +547,7 @@
       s.tip = s.chains.length ? s.chains.reduce((m, c) => (c.len > m.len ? c : m), s.chains[0]) : null;
     });
     // a single brain's hub (the self lobe) stands in the toroid; on the network screen the composition's centre does
-    const inToroid = pages.filter(p => isSelf(p) && !isChild(p) && pageOn(p) && !p.grp);
+    const inToroid = pages.filter(p => (isSelf(p) || p === coilCentre) && !isChild(p) && pageOn(p) && !p.grp);   // a non-self network centre still gets its locus
     inToroid.forEach((p, i) => { const m = inToroid.length, ang = -Math.PI / 2 + (Math.PI * 2 * i) / m, rr = m === 1 ? 0 : coilR * 0.42; p.gx = Math.cos(ang) * rr + (p.gox || 0); p.gy = Math.sin(ang) * rr * CL.ry + (p.goy || 0); p.gux = 0; p.guy = -1; p.gh = -Math.PI / 2; p.gflat = true; placeKidsRadial(p); p.children.forEach(x => { x.gflat = true; }); });
     coilPulses.length = 0;
     if (snap) snapToMap();
@@ -743,6 +743,7 @@
   // ---------- colour helpers ----------
   const colorCache = {};
   function rgba(hex, a) {
+    a = Math.round(a * 200) / 200;   // quantised so per-frame flicker (coil discharge, sparks) cannot grow the cache without bound
     const key = hex + a; if (colorCache[key]) return colorCache[key];
     const c = d3.color(hex); c.opacity = a; return (colorCache[key] = c.formatRgb());
   }
@@ -777,7 +778,7 @@
   // connections bend in the maps: along one chromosome or branch they bow out to the right like a Circos ribbon, inside one cell they bow
   // toward the nucleolus, and between groups they arch
   const ctrlOf = l => {
-    if (!mapped()) return null;
+    if (!mapped() || l.kind !== 'pp') return null;   // only page links are drawn curved; synapse bolts (sx) stay straight, so their pulses must too
     const a = l.source, b = l.target, mx = (a.x + b.x) / 2, my = (a.y + b.y) / 2;
     if (table()) {   // chords across the table bow toward the empty centre; neighbours at one seat take a shallow arc just inside the ring
       if (sameGroup(a, b)) { const d = Math.hypot(mx, my) || 1, pull = Math.min(90, 10 + Math.hypot(b.x - a.x, b.y - a.y) * 0.3); return [mx - mx / d * pull, my - my / d * pull]; }
