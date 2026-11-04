@@ -19,7 +19,7 @@ if (!url) { console.error('usage: node tools/qa-gate.cjs <brain-url>'); process.
   p.on('pageerror', e => errs.push(e.message)); p.on('console', m => { if (m.type() === 'error' && !/favicon/.test(m.text())) errs.push(m.text()); });
   await p.goto(url, { waitUntil: 'networkidle' });
   if (!/build\.html/.test(url)) { await p.waitForFunction(() => window.MINDBLOWN_QA && window.MINDBLOWN_MODIFIERS && window.MINDBLOWN_RENDERER, null, { timeout: 30000 }); }
-  if (!/build\.html/.test(url)) await settle(); else await p.waitForTimeout(1800);   // canvas clicks must land on a settled map
+  if (!/build\.html/.test(url)) await settle();   // canvas clicks must land on a settled map
   let off = [0, 0], page = p;
   if (/build\.html/.test(url)) {   // Build: answer the interview until there are neurons, then check the Explode view
     for (let i = 0; i < 25; i++) {
@@ -28,9 +28,11 @@ if (!url) { console.error('usage: node tools/qa-gate.cjs <brain-url>'); process.
       else if (await page.isVisible('#iv-skip')) await page.click('#iv-skip');
       await page.waitForTimeout(400);
     }
-    await page.click('#act-explode'); await page.waitForTimeout(3500);
-    const fe = await page.$('#explorer-frame'); const bb = await fe.boundingBox(); off = [bb.x, bb.y];
+    await page.click('#act-explode');
+    const fe = await page.waitForSelector('#explorer-frame', { state: 'visible', timeout: 30000 }); const bb = await fe.boundingBox(); off = [bb.x, bb.y];
     p = await fe.contentFrame(); p.mouse = { click: (x, y) => page.mouse.click(x + off[0], y + off[1]) };
+    await p.waitForFunction(() => window.MINDBLOWN_QA && window.MINDBLOWN_MODIFIERS && window.MINDBLOWN_RENDERER, null, { timeout: 30000 });
+    await settle(p);
     check(await page.$eval('#explorer', e => !e.hidden), 'Build opens the Explode view');
     check(await p.evaluate(async () => { await document.fonts.ready; return document.fonts.check('16px Satoshi') && [...document.fonts].some(f => f.family.includes('Satoshi') && f.status === 'loaded'); }), 'Explode view loads the self-hosted fonts');
   }

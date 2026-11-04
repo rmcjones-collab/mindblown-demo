@@ -99,7 +99,7 @@
       handle.onpointermove=e=>{if(!drag)return;if(Math.hypot(e.clientX-drag.x,e.clientY-drag.y)>3)drag.moved=true;   // latched: a drag that returns to its start is still a drag
       if(!drag.moved)return;   // under the threshold the handle stays put, so a click never nudges it
       const p=R.toWorld(e.clientX,e.clientY);m.x=p[0];m.y=p[1];};
-      handle.onpointerup=e=>{if(!drag)return;if(drag.moved||Math.hypot(e.clientX-drag.x,e.clientY-drag.y)>3){moved=true;past.push(drag.before);future=[];$('modifier-undo').disabled=false;$('modifier-redo').disabled=true;}drag=null;};
+      handle.onpointerup=e=>{if(!drag)return;if(drag.moved||Math.hypot(e.clientX-drag.x,e.clientY-drag.y)>3){moved=true;if(JSON.stringify(state)!==JSON.stringify(drag.before)){past.push(drag.before);future=[];$('modifier-undo').disabled=false;$('modifier-redo').disabled=true;}}drag=null;};
       handle.onkeydown=e=>{const v={ArrowLeft:[-15,0],ArrowRight:[15,0],ArrowUp:[0,-15],ArrowDown:[0,15]}[e.key];if(!v)return;e.preventDefault();const n=copy(state),x=n.modifiers.find(x=>x.id===m.id);x.x+=v[0];x.y+=v[1];commit(n);overlay.querySelector(`[data-modifier="${m.id}"]`).focus();};
       overlay.append(handle);
     }
