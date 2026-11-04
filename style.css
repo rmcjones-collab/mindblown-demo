@@ -277,6 +277,8 @@ input { font: inherit; }
   .fly-mini { width: 38px; height: 38px; }
   .fly-list { max-height: 34dvh; }
 }
+/* desktop: an open details panel sits on the right edge, so the rail steps to its left instead of being covered (panel 360px + 20px edge + 12px gap) */
+@media (min-width: 901px) { body:has(#panel:not([hidden])) .rail { right: 392px; } }
 /* zoom glyphs are text, so they read a touch larger than the icon buttons */
 .rail #zoom-ctl button { font-size: 19px; }
 /* short windows: tighter rail so Tools, View, File and Zoom still clear the header */

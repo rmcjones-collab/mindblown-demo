@@ -13,7 +13,7 @@
     <p>Place a controller on this brain. Adjust a <strong>scenario signal</strong>, not a sourced fact.</p>
     <label>Target neuron<select id="modifier-target"></select></label>
     <div class="modifier-actions"><button id="modifier-place" type="button">Place on canvas</button><button id="modifier-beside" type="button">Place beside target</button></div>
-    <p id="modifier-status" role="status" aria-live="polite">Choose a target, then place a modifier. Session only; reload resets it.</p>
+    <p id="modifier-status" role="status" aria-live="polite">Choose a target, then place a modifier. Session only; save a layout to keep it.</p>
     <div id="modifier-list"></div>
     <details id="modifier-dependencies"><summary>Modeled connections</summary><p>Knowledge links are not causal. Add your own directed dependencies to propagate the scenario signal.</p>
     <label>From neuron<select id="modifier-from"></select></label><label>To neuron<select id="modifier-to"></select></label>
@@ -123,5 +123,21 @@
     requestAnimationFrame(frame);
   }
   render();requestAnimationFrame(frame);
-  window.MINDBLOWN_MODIFIERS=Object.freeze({snapshot:()=>copy(state),results:()=>copy(values)});
+  // Saved layouts (app.js) carry the scenario: restore() takes an untrusted snapshot, keeps only well-formed controllers on this brain's
+  // neurons (at most 12) and well-formed connections, and commits it as one undoable step. Returns false when the snapshot is malformed, oversized, cyclic or has entries but none valid.
+  function restore(raw){
+    if(!raw||typeof raw!=='object'||!Array.isArray(raw.modifiers)||!Array.isArray(raw.edges))return false;
+    const fin=v=>typeof v==='number'&&Number.isFinite(v),known=new Set(ids);
+    const mods=raw.modifiers.filter(m=>m&&typeof m.id==='string'&&/^M\d{1,6}$/.test(m.id)&&known.has(m.target)&&fin(m.gain)&&m.gain>=0&&m.gain<=2&&fin(m.x)&&fin(m.y))
+      .slice(0,12).map(m=>({id:m.id,target:m.target,gain:m.gain,x:m.x,y:m.y}));
+    const seen=new Set(),edges=[];
+    const maxEdges=Math.min(ids.length*(ids.length-1)/2,20000);if(raw.edges.length>maxEdges)return false;   // more than the largest acyclic set over this brain's neurons: refused rather than cut short
+    for(const e of raw.edges){if(!e||!known.has(e.from)||!known.has(e.to)||!fin(e.weight)||Math.abs(e.weight)>1)continue;const k=e.from+'\u0000'+e.to;if(seen.has(k))continue;seen.add(k);edges.push({from:e.from,to:e.to,weight:e.weight});}
+    if(new Set(mods.map(m=>m.id)).size!==mods.length)return false;
+    if((raw.modifiers.length||raw.edges.length)&&!(mods.length||edges.length))return false;   // entries offered but none valid: keep the current scenario
+    if(!commit({modifiers:mods,edges},mods.length||edges.length?'Scenario restored from the saved layout.':''))return false;
+    serial=Math.max(serial,...mods.map(m=>+m.id.slice(1)));cancel();
+    return true;
+  }
+  window.MINDBLOWN_MODIFIERS=Object.freeze({snapshot:()=>copy(state),results:()=>copy(values),restore});
 })();

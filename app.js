@@ -1386,7 +1386,12 @@ ctx.shadowBlur=0;});
     }
     else if (!opts.noZoom) zoomTo(n, Math.max(k, 3));
     renderPanel(n); panel.hidden = false;
-    if (n.kind === 'page' && history.replaceState) { try { history.replaceState(null, '', '#n=' + encodeURIComponent(n.id) + (layout !== pageLayout ? '&layout=' + layout : '')); } catch (_) { /* Opaque preview: selection still works. */ } }
+    if (n.kind === 'page' && history.replaceState) { try {
+      const rest = location.hash.replace(/^#/, '').split('&').filter(x => x && !/^(n|layout)=/.test(x));
+      rest.push('n=' + encodeURIComponent(n.id));
+      if (layout !== pageLayout) rest.push('layout=' + layout);
+      history.replaceState(null, '', '#' + rest.join('&'));
+    } catch (_) { /* Opaque preview: selection still works. */ } }
   }
   function clearSelection() { if (selected && selected.kind === 'page' && !selected.pinned) { selected.fx = null; selected.fy = null; } selected = null; pulseSyn = null; panel.hidden = true; }
 
@@ -1491,6 +1496,7 @@ ctx.shadowBlur=0;});
       if (selected && !visible(selected)) clearSelection();
       renderLobeList(); rebuild(false); updateStats();
     }));
+    window.dispatchEvent(new CustomEvent('mindblown:lobes'));   // overlays (NNCCG charts) follow lobe visibility
   }
   document.getElementById('explode-all').addEventListener('change', e => { forceExplode = e.target.checked; updateLevel(); });
   document.getElementById('cocite').addEventListener('change', e => { showCocite = e.target.checked; rebuild(false); });
@@ -1534,6 +1540,12 @@ ctx.shadowBlur=0;});
       let g = document.getElementById('brain-tools');
       if (!g) { g = document.createElement('div'); g.id = 'brain-tools'; g.className = 'zoom-ctl rail-group'; g.setAttribute('role', 'group'); g.setAttribute('aria-label', 'Brains'); rail.prepend(g); }
       const b = document.createElement('button'); b.type = 'button'; b.id = id; b.title = title || label; b.setAttribute('aria-label', label); if (icon) b.innerHTML = icon; else b.textContent = label;   // icon: authored SVG only; a label is text
+      g.appendChild(b); return b;
+    },
+    // a view tool from an add-on (NNCCG Charts) joins an existing rail group, e.g. 'view-tools'; same contract as brainButton
+    toolButton({ group, id, label, title, icon }) {
+      const g = document.getElementById(group); if (!g || !rail.contains(g)) return null;
+      const b = document.createElement('button'); b.type = 'button'; b.id = id; b.title = title || label; b.setAttribute('aria-label', label); if (icon) b.innerHTML = icon; else b.textContent = label;
       g.appendChild(b); return b;
     },
     closeFlyout: () => hideFly(),   // an add-on panel opening beside the rail closes the rail's own flyout first
@@ -1673,7 +1685,7 @@ ctx.shadowBlur=0;});
 
   // ---------- saved layouts ----------
   // A layout is the arrangement the user made of this brain: the layout mode, every neuron's place (and which are pinned), hand-moved
-  // map groups, the lobes that are on, labels / explode / shared-source switches, the tool mode, the camera and the open neuron. Layouts
+  // map groups, the lobes that are on, labels / explode / shared-source switches, the tool mode, the camera, the open neuron and any Modifier Brain scenario. Layouts
   // are kept in this browser (localStorage, per brain) and can be downloaded as `.mindblown-layout.json` or opened from such a file.
   // Nothing leaves the browser. A file names its brain so one saved from another brain is refused rather than scrambling this one.
   const LAYOUT_FORMAT = 'mindblown-layout/1';
@@ -1696,6 +1708,7 @@ ctx.shadowBlur=0;});
       lobes: { ...lobeOn }, labels: labelsOn, explode: forceExplode, cocite: showCocite, mode,
       positions, pins: pages.filter(p => p.pinned).map(p => p.id), groups, loose,
       selected: selected && selected.kind === 'page' ? selected.id : null,
+      ...(window.MINDBLOWN_MODIFIERS ? { modifiers: window.MINDBLOWN_MODIFIERS.snapshot() } : {}),   // the Modifier Brain scenario, when this page has one
     };
   }
   function applyLayout(s) {
@@ -1705,6 +1718,8 @@ ctx.shadowBlur=0;});
     if ((sb.title && sb.title !== (D.title || brainTitle())) || (sb.center && D.center && sb.center !== D.center)) { flash(`that layout belongs to another brain${sb.title ? ` (${sb.title})` : ''}`); return false; }
     const known = pages.filter(p => point(s.positions[p.id])).length;   // an older build of this brain still has most of its neurons
     if (known < Math.max(1, pages.length * 0.5)) { flash(`that layout belongs to another brain${s.brain && s.brain.title ? ` (${s.brain.title})` : ''}`); return false; }
+    // the scenario goes first: if it cannot be restored (a cycle, a malformed snapshot) nothing changes; older layouts have no scenario and leave the current one alone
+    if (Object.prototype.hasOwnProperty.call(s, 'modifiers') && window.MINDBLOWN_MODIFIERS && !window.MINDBLOWN_MODIFIERS.restore(s.modifiers)) { flash('that layout’s Modifier scenario could not be restored · nothing changed'); return false; }
     clearSelection(); multi.clear(); marquee = null;
     if (s.lobes && typeof s.lobes === 'object') lobes.forEach(l => { if (typeof s.lobes[l.id] === 'boolean') lobeOn[l.id] = s.lobes[l.id]; });
     renderLobeList();
@@ -1863,7 +1878,9 @@ ctx.shadowBlur=0;});
     screenOf: id => { const n = pageById[id]; return n && pageOn(n) && (!isChild(n) || depthF >= 0.03) ? toScreen(n.x,n.y) : null; },
     toWorld: (x,y) => toWorld(x,y), toScreen: (x,y) => toScreen(x,y),
     focus: (id, opts) => { const n=pageById[id]; if(n) {ensureVisible(n);select(n, { by: (opts && opts.by) || 'api' });} },
-    selected: () => selected?.kind === 'page' ? selected.id : null
+    selected: () => selected?.kind === 'page' ? selected.id : null,
+    engine: 'canonical',
+    lobes: () => lobes.map(l => ({ id: l.id, name: l.name, color: l.color, on: !!lobeOn[l.id] }))   // read-only lobe state for overlays (NNCCG)
   });
   window.MINDBLOWN_QA = { screenOf: id => { const n = pageById[id]; return n ? toScreen(n.x, n.y) : null; }, selection: () => [...multi].map(n => n.id), pinned: () => pages.filter(n => n.pinned).map(n => n.id), mode: () => mode, labels: () => labelsOn, layout: () => layout, setLayout: l => setLayout(l, { noFit: true }), chromosomes: () => chromos.filter(c => c.on).map(c => ({ id: c.id, x: c.x, top: c.top, bot: c.bot, loci: c.loci.map(p => p.id), hub: c.hubOn ? c.hubOn.id : null })), groups: () => groupsNow().filter(g => g.on).map(g => ({ id: g.id, loci: g.loci.map(p => p.id), hub: g.hubOn ? g.hubOn.id : null, ox: g.ox || 0, oy: g.oy || 0 })), cells: () => cells.filter(c => c.on).map(c => ({ id: c.id, cx: c.cx, cy: c.cy, Rn: c.Rn, Rc: c.Rc })), seats: () => seats.filter(c => c.on).map(c => ({ id: c.id, a0: c.a0, a1: c.a1, loci: c.loci.map(p => p.id) })), tableR: () => tableR, trees: () => trees.filter(t => t.on).map(t => ({ id: t.id, x: t.x, y: t.y, w: t.w, h: t.h })), sealed: () => syns.filter(sealed).map(s => s.id), solve: (id, text) => !!synById[id] && solve(synById[id], text), screenshot, captureLayout, applyLayout, layouts: readLayouts, saveLayout, flyout: () => (openFly ? openFly.f.id : null) };
 })();
