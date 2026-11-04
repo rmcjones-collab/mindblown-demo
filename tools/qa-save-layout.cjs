@@ -35,7 +35,7 @@ const fs = require('fs');
   } else check(!(await p.$('#brain-tools')), 'no empty Brains group without a Modifier Brain');
   // 2. layouts flyout → Genome
   await p.click('#layout-menu'); await p.waitForTimeout(250);
-  check((await QA()).fly === 'layout-flyout' && await p.locator('#layout-flyout .lay').count() === 5, 'layout flyout opens with 5 rows');
+  check((await QA()).fly === 'layout-flyout' && await p.locator('#layout-flyout .lay').count() === 6, 'layout flyout opens with 6 rows');
   await p.screenshot({ path: 'qa/save_layout_menu.png' });
   await p.click('#layout-toggle'); await p.waitForTimeout(1700);
   let s = await QA(); check(s.layout === 'genome' && s.fly === null, 'Genome row switches layout and closes the flyout');
@@ -94,12 +94,12 @@ const fs = require('fs');
   const covered = await p.evaluate(() => [...document.querySelectorAll('#rail button')].filter(b => b.offsetParent).filter(b => { const r = b.getBoundingClientRect(); const hit = document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2); return !hit || !b.contains(hit) && hit !== b; }).map(b => b.id || b.title));
   check(!(await p.$eval('#panel', e => e.hidden)) && covered.length === 0, `with a neuron open every rail button stays clickable (covered: ${JSON.stringify(covered)})`);
   await p.close();
-  // 8. phone: the rail keeps Brains, File and Zoom; saved layouts open as a bottom sheet
+  // 8. phone: count rendered rail groups, including Charts only when visible; saved layouts open as a bottom sheet
   const saved = await ctx.storageState(); p = await phone.newPage(); watch(p);
   await p.goto(url); await p.evaluate(o => { o.forEach(x => (x.localStorage || []).forEach(kv => localStorage.setItem(kv.name, kv.value))); }, saved.origins); await p.reload();
   await p.goto(url); await p.waitForTimeout(2200);
   const vis = await p.evaluate(() => [...document.querySelectorAll('#rail .zoom-ctl')].filter(g => g.offsetParent !== null).map(g => g.id));
-  const hasCharts = await p.$('#rail #view-tools #nnccg-open') !== null;   // NNCCG keeps only its Charts button in the phone View group
+  const hasCharts = await p.evaluate(() => { const button = document.querySelector('#rail #view-tools #nnccg-open'); return !!button && button.offsetParent !== null; });
   check(JSON.stringify(vis) === JSON.stringify([...(hasBrains ? ['brain-tools'] : []), ...(hasCharts ? ['view-tools'] : []), 'file-tools', 'zoom-ctl']), `phone rail shows ${hasBrains ? 'Brains, ' : ''}${hasCharts ? 'Charts, ' : ''}File, Zoom (got ${vis})`);
   await p.screenshot({ path: 'qa/save_layout_mobile.png' });
   await p.tap('#save-layout').catch(() => p.click('#save-layout')); await p.waitForTimeout(300);

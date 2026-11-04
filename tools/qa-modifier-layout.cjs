@@ -9,7 +9,13 @@ if (!url) { console.error('usage: node tools/qa-modifier-layout.cjs <brain-url>'
   const check = (ok, what) => { console.log((ok ? 'ok   ' : 'FAIL ') + what); if (!ok) fails.push(what); };
   const ctx = await b.newContext({ viewport: { width: 1440, height: 900 } }); const p = await ctx.newPage();
   p.on('pageerror', e => errs.push(e.message)); p.on('console', m => { if (m.type() === 'error' && !/favicon/.test(m.text())) errs.push(m.text()); });
-  const load = async () => { await p.goto(url, { waitUntil: 'networkidle' }); await p.waitForTimeout(2400); };
+  const settle = async (pg = p) => {   // bounded wait until the map stops moving: a sampled neuron holds still (<0.5 px) across three 150 ms reads
+    let last = null, still = 0;
+    for (let i = 0; i < 60 && still < 3; i++) { const q = await pg.evaluate(() => { const Q = window.MINDBLOWN_QA, ids = window.MINDBLOWN && window.MINDBLOWN.pages ? window.MINDBLOWN.pages.slice(0, 3).map(x => x.id) : []; return Q ? ids.map(id => Q.screenOf(id)).filter(Boolean) : []; });
+      still = last && q.length && q.every((v, j) => last[j] && Math.hypot(v[0] - last[j][0], v[1] - last[j][1]) < 0.5) ? still + 1 : 0; last = q; await pg.waitForTimeout(150); }
+    if (still < 3) throw new Error('settle: the map did not hold still within 60 reads' + (last && last.length ? '' : ' (no neuron positions were readable)'));
+  };
+  const load = async () => { await p.goto(url, { waitUntil: 'networkidle' }); await p.waitForFunction(() => window.MINDBLOWN_QA && window.MINDBLOWN_MODIFIERS && window.MINDBLOWN_RENDERER, null, { timeout: 30000 }); await settle(); };
   const snap = () => p.evaluate(() => window.MINDBLOWN_MODIFIERS.snapshot());
   const results = () => p.evaluate(() => Object.fromEntries(Object.entries(window.MINDBLOWN_MODIFIERS.results()).map(([k, v]) => [k, v.value])));
   await load();
@@ -48,9 +54,13 @@ if (!url) { console.error('usage: node tools/qa-modifier-layout.cjs <brain-url>'
     Object.keys(bad.positions).forEach(id => { bad.positions[id] = [9999, 9999]; });
     bad.modifiers = { modifiers: [], edges: [{ from: a, to: c, weight: 0.5 }, { from: c, to: a, weight: 0.5 }] }; localStorage.setItem(k, JSON.stringify([bad])); } } }, [a, c]);
   await load();
+  await p.evaluate(a => window.MINDBLOWN_MODIFIERS.restore({ modifiers: [{ id: 'M1', target: a, gain: 1.4, x: 0, y: 0 }], edges: [] }), a);   // a known scenario to keep
+  await settle();
+  const seeded = JSON.stringify(await snap()), at0 = await p.evaluate(a => window.MINDBLOWN_QA.screenOf(a), a);
   await p.click('#save-layout'); await p.waitForTimeout(250); await p.click('#layouts-list .apply'); await p.waitForTimeout(600);
-  const hint = await p.evaluate(() => document.body.innerText);
-  check((await snap()).modifiers.length === 0 && (await snap()).edges.length === 0, 'a layout with a cyclic scenario leaves the current scenario alone');
+  const hint = await p.evaluate(() => document.body.innerText), at1 = await p.evaluate(a => window.MINDBLOWN_QA.screenOf(a), a);
+  check(JSON.stringify(await snap()) === seeded, 'a layout with a cyclic scenario leaves the current scenario exactly as it was');
+  check(!!at0 && !!at1 && Math.hypot(at1[0] - at0[0], at1[1] - at0[1]) < 3, `and leaves the arrangement in place (moved ${at0 && at1 ? Math.round(Math.hypot(at1[0] - at0[0], at1[1] - at0[1])) : '?'} px)`);
   check(/could not be restored · nothing changed/.test(hint), 'and says nothing changed');
   await p.evaluate(() => { for (let i = 0; i < localStorage.length; i++) { const k = localStorage.key(i); if (k.startsWith('mindblown.layouts.')) { const l = JSON.parse(localStorage.getItem(k)); l[0].modifiers = null; localStorage.setItem(k, JSON.stringify(l)); } } });
   await load(); await p.click('#save-layout'); await p.waitForTimeout(250); await p.click('#layouts-list .apply'); await p.waitForTimeout(600);
