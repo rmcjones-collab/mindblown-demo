@@ -95,11 +95,11 @@
       const handle=button(m.id,()=>{if(moved){moved=false;return;}active=m.id;panel.hidden=false;launch.setAttribute('aria-expanded','true');card.scrollIntoView({block:'nearest'});range.focus();});
       handle.className='modifier-node';handle.dataset.modifier=m.id;handle.setAttribute('aria-label',`Modifier ${m.id}, target ${names.get(m.target)}. Arrow keys move.`);
       let drag=null;
-      handle.onpointerdown=e=>{e.stopPropagation();moved=false;drag={x:e.clientX,y:e.clientY,before:copy(state)};handle.setPointerCapture(e.pointerId);};
+      handle.onpointerdown=e=>{e.stopPropagation();moved=false;drag={x:e.clientX,y:e.clientY,world:R.toWorld(e.clientX,e.clientY),origin:[m.x,m.y],before:copy(state)};handle.setPointerCapture(e.pointerId);};
       handle.onpointermove=e=>{if(!drag)return;if(Math.hypot(e.clientX-drag.x,e.clientY-drag.y)>3)drag.moved=true;   // latched: a drag that returns to its start is still a drag
       if(!drag.moved)return;   // under the threshold the handle stays put, so a click never nudges it
-      const p=R.toWorld(e.clientX,e.clientY);m.x=p[0];m.y=p[1];};
-      handle.onpointerup=e=>{if(!drag)return;if(drag.moved||Math.hypot(e.clientX-drag.x,e.clientY-drag.y)>3){moved=true;if(JSON.stringify(state)!==JSON.stringify(drag.before)){past.push(drag.before);future=[];$('modifier-undo').disabled=false;$('modifier-redo').disabled=true;}}drag=null;};
+      const p=R.toWorld(e.clientX,e.clientY);m.x=drag.origin[0]+(p[0]-drag.world[0]);m.y=drag.origin[1]+(p[1]-drag.world[1]);};
+      handle.onpointerup=e=>{if(!drag)return;if(drag.moved||Math.hypot(e.clientX-drag.x,e.clientY-drag.y)>3){moved=true;if(JSON.stringify(state)!==JSON.stringify(drag.before)){past.push(drag.before);if(past.length>50)past.shift();future=[];$('modifier-undo').disabled=false;$('modifier-redo').disabled=true;}}drag=null;};
       handle.onkeydown=e=>{const v={ArrowLeft:[-15,0],ArrowRight:[15,0],ArrowUp:[0,-15],ArrowDown:[0,15]}[e.key];if(!v)return;e.preventDefault();const n=copy(state),x=n.modifiers.find(x=>x.id===m.id);x.x+=v[0];x.y+=v[1];commit(n);overlay.querySelector(`[data-modifier="${m.id}"]`).focus();};
       overlay.append(handle);
     }
