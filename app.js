@@ -659,7 +659,9 @@
     const key = hex + a; if (colorCache[key]) return colorCache[key];
     const c = d3.color(hex); c.opacity = a; return (colorCache[key] = c.formatRgb());
   }
-  const lobeColor = n => lobeById[n.lobe]?.color || '#9aa';
+  // grown material (grow.js: the Quantum Entangler) carries an origin tag and is painted in that origin's colour (MBN.originColors), never its lobe's
+  const originColor = n => (n && n.origin && window.MBN && window.MBN.originColors && window.MBN.originColors[n.origin]) || null;
+  const lobeColor = n => originColor(n) || lobeById[n.lobe]?.color || '#9aa';
   const clamp01 = v => Math.max(0, Math.min(1, v));
 
   // ---------- pulses (signals travelling along connections) ----------
@@ -724,7 +726,8 @@
       // membrane: a bilayer, then the cytoplasm
       ctx.beginPath(); ctx.arc(c.cx, c.cy, c.Rc, 0, Math.PI * 2); ctx.fillStyle = rgba(c.color, 0.035); ctx.fill();
       ctx.lineWidth = sw(2); ctx.strokeStyle = rgba(c.color, 0.4); ctx.stroke();
-      ctx.beginPath(); ctx.arc(c.cx, c.cy, c.Rc - sw(5), 0, Math.PI * 2); ctx.lineWidth = sw(1); ctx.strokeStyle = rgba(c.color, 0.18); ctx.stroke();
+      const innerMembraneR = c.Rc - sw(5);
+      if (innerMembraneR > 0) { ctx.beginPath(); ctx.arc(c.cx, c.cy, innerMembraneR, 0, Math.PI * 2); ctx.lineWidth = sw(1); ctx.strokeStyle = rgba(c.color, 0.18); ctx.stroke(); }
       // territories: wedges of the nucleus in each lobe's colour, from the nucleolus out to the envelope
       c.terr.forEach(t => {
         ctx.beginPath(); ctx.arc(c.cx, c.cy, c.Rn - 2, t.a0, t.a1); ctx.arc(c.cx, c.cy, c.hubR * 0.9, t.a1, t.a0, true); ctx.closePath();
@@ -1363,6 +1366,7 @@ ctx.shadowBlur=0;});
   function select(n, opts = {}) {
     if (selected && selected.kind === 'page' && !selected.pinned) { selected.fx = null; selected.fy = null; }
     selected = n; pulseSyn = null;
+    try { window.dispatchEvent(new CustomEvent('mbn:select', { detail: { id: n.id, kind: n.kind, by: opts.by || 'visitor', origin: n.origin || null } })); } catch (e) { /* an add-on threw inside its listener: never the renderer's problem */ }   // add-ons (the Quantum Entangler) listen for visitor selections here; deep links, restores and API calls say who they are
     if (n.kind === 'page' && !isChild(n) && !mapped()) { n.fx = n.x; n.fy = n.y; }   // sub-neurons stay free so they can reach their ring slot; in a map the locus holds it
     if (n.kind === 'page') {
       const kk = isChild(n) ? 3.6 : n.nSyn > 14 ? 2.6 : 3.2;
@@ -1473,7 +1477,7 @@ ctx.shadowBlur=0;});
     }));
     panel.scrollTop = 0;
   }
-  const srcKindShort = s => ({ session: 'session', github: D.demo ? 'code' : 'github', web: 'web', gmail: 'gmail', calendar: 'calendar', spotify: 'spotify', plaid: 'bank', memory: 'memory', wiki: 'brain' }[s.kindOf] || 'source');
+  const srcKindShort = s => ({ session: 'session', github: D.demo ? 'code' : 'github', web: 'web', gmail: 'gmail', calendar: 'calendar', spotify: 'spotify', plaid: 'bank', memory: 'memory', wiki: 'brain', mindblown: 'brain', entangler: 'entangler' }[s.kindOf] || 'source');
   function ensureLobe(id) { if (!lobeOn[id]) { lobeOn[id] = true; renderLobeList(); rebuild(false); } }
   // a sub-neuron needs its own lobe and its parent's lobe on before it can be selected
   function ensureVisible(n) { if (n.kind === 'page') { if (n.parent) ensureLobe(n.parent.lobe); ensureLobe(n.lobe); } else if (n.kind === 'syn') ensureVisible(pageById[n.page]); }
@@ -1735,7 +1739,7 @@ ctx.shadowBlur=0;});
     refreshForces(); rebuild(false); sim.alpha(mapped() ? 0.5 : 0.12);   // the free layout was an equilibrium when saved, so a gentle restart keeps it
     const kk = Math.min(9, Math.max(0.08, num(s.view && s.view.k, 0)));
     if (kk > 0 && s.view) d3.select(canvas).transition().duration(700).ease(d3.easeCubicInOut).call(zoom.transform, d3.zoomIdentity.translate(W / 2 - num(s.view.cx) * kk, H / 2 - num(s.view.cy) * kk).scale(kk));
-    const sel = ownPage(s.selected); if (sel && visible(sel)) select(sel, { noZoom: true });
+    const sel = ownPage(s.selected); if (sel && visible(sel)) select(sel, { noZoom: true, by: 'restore' });
     updateLevel(); updateHint(); updateStats();
     return true;
   }
@@ -1865,7 +1869,7 @@ ctx.shadowBlur=0;});
   document.fonts?.ready.then(() => document.getElementById('loading').classList.add('done'));
   setTimeout(() => document.getElementById('loading').classList.add('done'), 1500);
   // deep link from another brain or a shared URL: #n=<page id>
-  const openHash = () => { const m = /[#&]n=([^&]+)/.exec(location.hash); if (!m) return; const n = pageById[decodeURIComponent(m[1])]; if (n) { ensureVisible(n); select(n); } };
+  const openHash = () => { const m = /[#&]n=([^&]+)/.exec(location.hash); if (!m) return; const n = pageById[decodeURIComponent(m[1])]; if (n) { ensureVisible(n); select(n, { by: 'hash' }); } };
   setTimeout(openHash, 1700);
   window.addEventListener('hashchange', openHash);
   // read-only hooks for the QA scripts in tools/ (screen position of a neuron, current marquee selection)
@@ -1873,7 +1877,7 @@ ctx.shadowBlur=0;});
     nodes: () => pages.map(n => ({id:n.id, title:n.title})),
     screenOf: id => { const n = pageById[id]; return n && pageOn(n) && (!isChild(n) || depthF >= 0.03) ? toScreen(n.x,n.y) : null; },
     toWorld: (x,y) => toWorld(x,y), toScreen: (x,y) => toScreen(x,y),
-    focus: id => { const n=pageById[id]; if(n) {ensureVisible(n);select(n);} },
+    focus: (id, opts) => { const n=pageById[id]; if(n) {ensureVisible(n);select(n, { by: (opts && opts.by) || 'api' });} },
     selected: () => selected?.kind === 'page' ? selected.id : null,
     engine: 'canonical',
     lobes: () => lobes.map(l => ({ id: l.id, name: l.name, color: l.color, on: !!lobeOn[l.id] }))   // read-only lobe state for overlays (NNCCG)
