@@ -31,14 +31,22 @@ const fs = require('fs');
   }
 
   // 2. lobes list scrolls at a short viewport
-  const sc = await p.evaluate(() => { const l = document.getElementById('lobe-list'); const pane = document.getElementById('lobes'); return l && { client: l.clientHeight, scroll: l.scrollHeight, overflow: getComputedStyle(l).overflowY, paneBottom: Math.round(pane.getBoundingClientRect().bottom), vh: innerHeight, n: l.children.length }; });
-  console.log('lobe list:', sc);
-  if (!sc) errs.push('no #lobe-list'); else {
+  const sc = await p.evaluate(() => { const l = document.getElementById('lobe-list'), pane = document.getElementById('lobes'); if (!l || !pane) return null; const r = pane.getBoundingClientRect(); return { client: pane.clientHeight, scroll: pane.scrollHeight, overflow: getComputedStyle(pane).overflowY, paneTop: Math.round(r.top), paneBottom: Math.round(r.bottom), vh: innerHeight, n: l.children.length }; });
+  console.log('lobes panel:', sc);
+  if (!sc) errs.push('no #lobes / #lobe-list'); else {
     if (sc.paneBottom > sc.vh) errs.push('lobes panel runs off screen');
-    if (sc.n > 8 && sc.scroll <= sc.client) errs.push('lobe list does not overflow with ' + sc.n + ' lobes at 600px');
-    await p.evaluate(() => { document.getElementById('lobe-list').scrollTop = 400; });
-    const st = await p.evaluate(() => document.getElementById('lobe-list').scrollTop);
-    if (sc.n > 8 && st === 0) errs.push('lobe list did not scroll');
+    if (sc.scroll > sc.client + 1) {   // more than fits: the panel itself must scroll
+      await p.evaluate(() => { document.getElementById('lobes').scrollTop = 400; });
+      if (await p.evaluate(() => document.getElementById('lobes').scrollTop) === 0) errs.push('lobes panel overflows but does not scroll');
+    }
+    // whether or not it scrolls, the last lobe and the last option checkbox can be brought fully into the panel's view
+    const reach = await p.evaluate(() => { const pane = document.getElementById('lobes'); const inView = e => { if (!e) return null; e.scrollIntoView({ block: 'nearest' }); const a = e.getBoundingClientRect(), b = pane.getBoundingClientRect(); return a.top >= b.top - 1 && a.bottom <= b.bottom + 1 && a.bottom <= innerHeight; };
+      const opts = [...pane.querySelectorAll('input[type=checkbox]')].filter(x => x.closest('label') && x.closest('label').offsetParent);
+      return { lobe: inView(document.querySelector('#lobe-list .lobe:last-child')), option: inView(opts.length ? opts[opts.length - 1].closest('label') : null) }; });
+    console.log('reach:', reach);
+    if (reach.lobe === false) errs.push('last lobe cannot be scrolled into view');
+    if (reach.option === false) errs.push('last option checkbox cannot be scrolled into view');
+    await p.evaluate(() => { document.getElementById('lobes').scrollTop = 0; });
   }
   await p.screenshot({ path: 'qa/ui_short.png' });
 
