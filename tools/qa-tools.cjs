@@ -32,7 +32,8 @@ const fs = require('fs');
   await p.keyboard.press('Escape'); await p.waitForTimeout(200);
   const sid = await p.evaluate(() => (window.MINDBLOWN.pages.find(x => x.id === 'proto/sacn') || window.MINDBLOWN.pages.find(x => x.lobe !== 'self' && !x.parent)).id);
   const s0 = await p.evaluate(id => window.MINDBLOWN_QA.screenOf(id), sid);
-  await p.mouse.move(s0[0], s0[1]); await p.mouse.down({ button: 'middle' }); await p.mouse.move(s0[0] - 40, s0[1] - 120, { steps: 10 }); await p.mouse.move(s0[0] - 80, s0[1] - 200, { steps: 10 }); await p.mouse.up({ button: 'middle' });
+  const vy = s0[1] > 424 ? -1 : 1, vx = s0[0] > 683 ? -1 : 1;   // toward the middle of the window, so the pan and click below stay on screen
+  await p.mouse.move(s0[0], s0[1]); await p.mouse.down({ button: 'middle' }); await p.mouse.move(s0[0] + 40 * vx, s0[1] + 120 * vy, { steps: 10 }); await p.mouse.move(s0[0] + 80 * vx, s0[1] + 200 * vy, { steps: 10 }); await p.mouse.up({ button: 'middle' });
   await p.waitForTimeout(400);
   const s1 = await p.evaluate(id => window.MINDBLOWN_QA.screenOf(id), sid);
   console.log('mouse3 moved', sid, 'by', Math.round(Math.hypot(s1[0] - s0[0], s1[1] - s0[1])), 'px | pinned now', await p.evaluate(() => window.MINDBLOWN_QA.pinned().length));
