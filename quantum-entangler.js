@@ -135,10 +135,11 @@
   function sync() { const n = btn.querySelector('.mb-ent-n'); if (n) n.textContent = journal.length ? String(journal.length) : ''; btn.setAttribute('aria-label', `Quantum Entangler: ${on ? 'entangled, press to switch off' : 'press to entangle this brain'} (E)${journal.length ? `, ${journal.length} pair${journal.length === 1 ? '' : 's'}` : ''}`); btn.title = `Quantum Entangler (E) — ${on ? 'on' : 'off'}${journal.length ? ` · ${journal.length} pair${journal.length === 1 ? '' : 's'}` : ''}. Shift-press twice to forget the pairs.`; }
 
   // ---------- evidence shared between two neurons ----------
-  let pageSrcs = null, srcById = null;
+  let pageSrcs = null, srcById = null, eligibleIds = null;
   function evidence() {
     if (pageSrcs) return;
     pageSrcs = Object.create(null); srcById = Object.create(null);
+    eligibleIds = new Set((D.pages || []).filter(p => !p.parent).map(p => p.id));
     for (const s of (D.sources || [])) { srcById[s.id] = s; for (const pid of (s.pages || [])) (pageSrcs[pid] = pageSrcs[pid] || new Set()).add(s.id); }
   }
   const sharedSources = (a, b) => { const A = pageSrcs[a] || new Set(), B = pageSrcs[b]; return B ? [...A].filter(id => B.has(id)) : []; };
@@ -150,7 +151,7 @@
     const wired = new Set(A.neighbors), ta = tokens(A.title);
     const out = [];
     for (const p of pages) {
-      if (p === A || p.origin || p.id === hub || p.blank || hidden.has(p.lobe) || children.has(p.id) || wired.has(p.id) || collapsed.has(p.id)) continue;
+      if (!eligibleIds.has(p.id) || p === A || p.origin || p.id === hub || p.blank || hidden.has(p.lobe) || children.has(p.id) || wired.has(p.id) || collapsed.has(p.id)) continue;
       const shared = sharedSources(A.id, p.id), terms = tokens(p.title).filter(t => ta.includes(t)).length;
       out.push({ kind: 'here', id: p.id, title: p.title, shared, terms, w: (0.04 + 2 * shared.length + 0.6 * terms) / Math.sqrt(1 + p.deg) });   // shared evidence weighs most; a title word counts a little; a bare neuron is the long shot
     }
@@ -216,6 +217,8 @@
     return { lobeId, hubId };
   }
   function apply(act) {
+    evidence();
+    if (!eligibleIds.has(act.a) || !act.afield && !eligibleIds.has(act.b)) return false;
     const g = G(), pages = g.pages(), byId = Object.fromEntries(pages.map(p => [p.id, p]));
     const A = byId[act.a]; if (!A || A.origin || A.id === g.hub() || A.parent || A.blank) return false;
     if (!act.afield && (!byId[act.b] || byId[act.b].origin || act.a === act.b || act.b === g.hub())) return false;
@@ -255,6 +258,7 @@
     const g = G(); if (!g || !on && !opts.force) return null;
     const now = Date.now(); if (!opts.force && now - lastMeasure < 700) return null; lastMeasure = now;
     const pages = g.pages(), A = pages.find(p => p.id === id); if (!A) return null;
+    evidence(); if (!eligibleIds.has(A.id)) return null;   // generated atoms and folded children are anatomy, not connectome vertices
     if (A.origin) return null;   // grown material (the mice's, the Entangler's own) is not measured; selecting it already makes it fire
     const hidden = new Set((D.lobes || []).filter(l => l.hidden).map(l => l.id)), children = new Set((D.pages || []).filter(p => p.parent).map(p => p.id));
     if (A.id === g.hub() || hidden.has(A.lobe) || children.has(A.id) || A.blank) return null;
