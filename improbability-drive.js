@@ -144,10 +144,16 @@
     const hidden = !spot;   // nowhere free: hide rather than float over reading text
     btn.classList.toggle('mb-hidden', hidden);
     btn.disabled = hidden; btn.tabIndex = hidden ? -1 : 0;   // a hidden button is out of the tab order and cannot be activated
-    const rightEdge = W - (left - 10);
+    // desktop: a details panel opened beside the rail (left of the Drive) keeps its text clear; the readout and toast sit left of it instead
+    const side = W > 900 && [...document.querySelectorAll('.panel')].map(p => !p.hidden && p.getClientRects().length ? p.getBoundingClientRect() : null)
+      .find(q => q && q.width > 0 && q.right <= left + 4 && q.left > W / 2 && q.top < top + size && q.bottom > top) || null;
+    const rightEdge = side ? W - side.left + 10 : W - (left - 10);
     if (out) { out.style.right = rightEdge + 'px'; out.style.top = (top + size / 2 - 14) + 'px'; }
     if (toastEl) {
-      if (hidden) {   // the button's spot is under a panel: say it centred, clear of the panel text, instead
+      if (side && !hidden) {
+        toastEl.style.left = 'auto'; toastEl.style.bottom = 'auto'; toastEl.style.transform = 'none';
+        toastEl.style.right = rightEdge + 'px'; toastEl.style.top = top + 'px';
+      } else if (hidden) {   // the button's spot is under a panel: say it centred, clear of the panel text, instead
         toastEl.style.right = 'auto'; toastEl.style.left = '50%'; toastEl.style.transform = 'translateX(-50%)';
         if (W <= 900) { toastEl.style.bottom = 'auto'; toastEl.style.top = '12px'; } else { toastEl.style.top = 'auto'; toastEl.style.bottom = '72px'; }
       } else {
