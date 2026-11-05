@@ -152,7 +152,7 @@
     if (toastEl) {
       if (side && !hidden) {
         toastEl.style.left = 'auto'; toastEl.style.bottom = 'auto'; toastEl.style.transform = 'none';
-        toastEl.style.right = rightEdge + 'px'; toastEl.style.top = top + 'px';
+        toastEl.style.right = rightEdge + 'px'; toastEl.style.top = (top + size + 8) + 'px';   // below the readout, never over it
       } else if (hidden) {   // the button's spot is under a panel: say it centred, clear of the panel text, instead
         toastEl.style.right = 'auto'; toastEl.style.left = '50%'; toastEl.style.transform = 'translateX(-50%)';
         if (W <= 900) { toastEl.style.bottom = 'auto'; toastEl.style.top = '12px'; } else { toastEl.style.top = 'auto'; toastEl.style.bottom = '72px'; }

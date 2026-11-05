@@ -2282,10 +2282,12 @@ ctx.shadowBlur=0;});
       dock.classList.add('zoom-ctl', 'mb-in-rail');
       dock.style.left = Math.round(r.left + r.width / 2 - size / 2 + w.scrollX) + 'px';
       dock.style.top = Math.round(r.top - 10 - size + w.scrollY) + 'px';
-      // phones only: an open bottom sheet lifts the whole rail; when that would put the button over the header, it hides (as the Entangler does)
+      // no room on the rail (a short landscape phone, or a bottom sheet lifting the rail into the header): use the fixed corner place
+      // instead, so the launcher always stays reachable
       const t = r.top - 10 - size, l = r.left + r.width / 2 - size / 2;
       const hit = [...doc.querySelectorAll('#top > *, .search, .brand, nav.brains')].some(e => { if (e.offsetParent === null) return false; const q = e.getBoundingClientRect(); return q.width > 0 && q.left < l + size + 4 && q.right > l - 4 && q.top < t + size + 4 && q.bottom > t - 4; });
-      dock.hidden = t < 4 || (!desk() && hit);
+      if (t < 4 || (!desk() && hit)) { dock.classList.remove('zoom-ctl', 'mb-in-rail'); dock.style.left = dock.style.top = ''; }
+      dock.hidden = false;
     }
     function placeCard() {
       if (panel.hidden || !desk() || !dock.classList.contains('mb-in-rail')) { panel.style.left = panel.style.right = panel.style.top = panel.style.bottom = ''; return; }
@@ -2360,6 +2362,7 @@ ctx.shadowBlur=0;});
         pending = null;
         const now = current();
         if (!enabled || token !== run || key !== runKey || modelToken !== runModel) { sync(); return; }
+        if (now.selected !== snap.selected) { $('status').textContent = 'You opened another neuron, so this journey was cancelled. Generate again when ready.'; sync(); return; }
         if (!candidates(now, null).some(n => n.id === destination.id)) {
           $('status').textContent = 'The visible selection changed. Generate again using this Brain’s visible neurons.'; sync(); return;
         }
