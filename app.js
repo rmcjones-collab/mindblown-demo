@@ -2136,8 +2136,7 @@ ctx.shadowBlur=0;});
     navigate: id => {
       const n = pageById[id];
       if (!n || !pageOn(n) || n.parent || isSelf(n) || n.isCenter) return false;
-      select(n);
-      zoomTo(n, 2, reduceMotion ? 0 : 650);
+      select(n, { by: 'randonaut' });   // select() zooms in (at least 2.6×); 'randonaut', not 'visitor', so the Entangler doesn't count it as a click
       return selected && selected.id === id;
     }
   };
@@ -2172,7 +2171,7 @@ ctx.shadowBlur=0;});
     power: 'Connection counts farther from the eligible group’s average have a higher chance.'
   };
   function weights(degrees, mode) {
-    if (!Object.hasOwn(descriptions, mode)) throw new Error('Unknown exploration mode');
+    if (!Object.prototype.hasOwnProperty.call(descriptions, mode)) throw new Error('Unknown exploration mode');
     const ds = degrees.map(d => Number.isFinite(d) ? Math.max(0, d) : 0);
     const mean = ds.reduce((a, b) => a + b, 0) / (ds.length || 1);
     return ds.map(d => mode === 'attractor' ? d + 1 : mode === 'void' ? 1 / (d + 1) : mode === 'power' ? Math.abs(d - mean) + 1 : 1);

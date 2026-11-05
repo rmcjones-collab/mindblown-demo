@@ -146,7 +146,7 @@
     btn.disabled = hidden; btn.tabIndex = hidden ? -1 : 0;   // a hidden button is out of the tab order and cannot be activated
     // desktop: a details panel opened beside the rail (left of the Drive) keeps its text clear; the readout and toast sit left of it instead
     const side = W > 900 && [...document.querySelectorAll('.panel')].map(p => !p.hidden && p.getClientRects().length ? p.getBoundingClientRect() : null)
-      .find(q => q && q.width > 0 && q.right <= left + 4 && q.left > W / 2 && q.top < top + size && q.bottom > top) || null;
+      .find(q => q && q.width > 0 && q.right <= left + 4 && q.right > W / 2 && q.top < top + size && q.bottom > top) || null;
     const rightEdge = side ? W - side.left + 10 : W - (left - 10);
     if (out) { out.style.right = rightEdge + 'px'; out.style.top = (top + size / 2 - 14) + 'px'; }
     if (toastEl) {
