@@ -164,14 +164,14 @@
   // or a #layout=genome hash; the tool buttons, the switches in the lobes panel and the keys toggle them.
   // 'table' (T) seats the brain around a round table with no head.
   // 'coil' (Z, for zap) makes the brain a Tesla coil in discharge: the hub in the toroid, every lobe a lightning streamer, every neuron a kink of it.
-  const LAYOUTS = ['neural', 'genome', 'cell', 'tree', 'table', 'coil'];
-  const LAYOUT_NAME = { neural: 'neural', genome: 'genome', cell: 'karyocyte', tree: 'family tree', table: 'table', coil: 'coil' };
+  const LAYOUTS = ['neural', 'genome', 'cell', 'tree', 'table', 'coil', 'orbit'];
+  const LAYOUT_NAME = { neural: 'neural', genome: 'genome', cell: 'karyocyte', tree: 'family tree', table: 'table', coil: 'coil', orbit: 'orbit' };
   // the page's default layout, then the link hash on top of it: a shared `#layout=` link (including `layout=neural`) opens as sent whatever the page defaults to
   const pageLayout = LAYOUTS.includes(OPT.layout) ? OPT.layout : 'neural';
   const hashLayout = () => { const m = /[#&]layout=(\w+)\b/.exec(location.hash); return m && LAYOUTS.includes(m[1]) ? m[1] : null; };
   let layout = hashLayout() || pageLayout;
-  const genome = () => layout === 'genome', cell = () => layout === 'cell', tree = () => layout === 'tree', table = () => layout === 'table', coil = () => layout === 'coil';
-  const radial = () => table() || coil();   // layouts whose synapse ladders and labels run along a per-neuron radius (n.gux, n.guy)
+  const genome = () => layout === 'genome', cell = () => layout === 'cell', tree = () => layout === 'tree', table = () => layout === 'table', coil = () => layout === 'coil', orbit = () => layout === 'orbit';
+  const radial = () => table() || coil() || orbit();   // layouts whose synapse ladders and labels run along a per-neuron radius (n.gux, n.guy)
   const mapped = () => layout !== 'neural';   // any map: neurons are held at loci, connections are drawn but do not pull
 
   // ---------- genome layout: every brain mapped like a karyotype ----------
@@ -194,7 +194,7 @@
   } else lobes.filter(l => !selfLobe(l)).forEach(l => { const c = { id: l.id, name: l.name, color: l.color, hub: null, segs: [l] }; chromos.push(c); chromoOf[l.id] = c; });
   // every map is made of groups the user can pick up whole: chromosomes here, cells in the karyocyte layout, branches in the family tree.
   // A group has .loci (its top-level neurons), .hubOn (a hub neuron that sits inside it) and .on; relayout() stamps p.grp on each member
-  const groupsNow = () => genome() ? chromos : cell() ? cells : tree() ? branches : table() ? seats : coil() ? streamers : [];
+  const groupsNow = () => genome() ? chromos : cell() ? cells : tree() ? branches : table() ? seats : coil() ? streamers : orbit() ? orbits : [];
   const grpOf = n => (isChild(n) ? n.parent : n).grp || null;
   const sameGroup = (a, b) => !!grpOf(a) && grpOf(a) === grpOf(b);
   const groupMembers = g => [...(g.hubOn ? [g.hubOn, ...g.hubOn.children] : []), ...g.loci, ...g.loci.flatMap(p => p.children)];
@@ -553,14 +553,95 @@
     coilPulses.length = 0;
     if (snap) snapToMap();
   }
-  const relayout = snap => { if (genome()) layoutGenome(snap); else if (cell()) layoutCell(snap); else if (tree()) layoutTree(snap); else if (table()) layoutTable(snap); else if (coil()) layoutCoil(snap); };
+  // ---------- orbit layout: the hub at the centre, the neurons on concentric rings ----------
+  // A brain as a system of orbits. The hub sits at the centre and every other neuron takes a ring. A dataset can say which: an integer
+  // `ring` on the page or on its lobe (0 is the centre). Without one, a hub is ring 0 and each lobe becomes a ring of its own in lobe order.
+  // On a network screen the brains' hubs share a ring the same way. Inside a ring the neurons keep the dataset's order; on the rings further
+  // out a neuron sits at the mean angle of the neurons it is connected to on the rings inside (or, on a network, at its brain's hub), so a
+  // chain of connections runs outward like a spoke, and the ring is then spread (an isotonic fit) so nothing overlaps. Sub-neurons stand
+  // outside their parent with their ladders running outward; a neuron's own ladder runs inward into the gap; connections are drawn straight
+  // between rings. Built from pages[].ring / lobes[].ring / lobe order alone, so any brain has an orbit.
+  const OB = { band: 30, gap: 70 };
+  const orbits = [];
+  const lobeOrder = Object.fromEntries(lobes.filter(l => !selfLobe(l)).map((l, i) => [l.id, i]));
+  const ringOf = p => { const r = p.ring ?? lobeById[p.lobe]?.ring; return Number.isFinite(r) ? r : p.isCenter ? 0 : (lobeOrder[p.lobe] ?? 0) + 1; };
+  // least-squares non-decreasing fit (pool adjacent violators): the angles of one ring, in order, pushed apart no more than they must be
+  const pava = t => { const bl = []; t.forEach(v => { let b = { s: v, n: 1, v }; while (bl.length && bl[bl.length - 1].v > b.v) { const a = bl.pop(); b = { s: a.s + b.s, n: a.n + b.n, v: (a.s + b.s) / (a.n + b.n) }; } bl.push(b); }); return bl.flatMap(b => Array(b.n).fill(b.v)); };
+  function layoutOrbit(snap) {
+    pages.forEach(p => { p.grp = null; });
+    const tops = pages.filter(p => !isChild(p) && pageOn(p));
+    const byRing = d3.group(tops, ringOf), ringIds = [...byRing.keys()].sort((a, b) => a - b);
+    const prev = Object.fromEntries(orbits.map(g => [g.ring, g]));
+    orbits.length = 0;
+    const slotW = p => Math.max(2 * p.r * 1.6 + 10, d3.sum(p.children.filter(pageOn), kidPitch));
+    const kidOut = p => { const kids = p.children.filter(pageOn); return kids.length ? TB.ring / 2 + 16 + Math.max(...kids.map(x => 2 * x.r * 1.5 + synReach(x))) : 0; };
+    // a network brain's hub gives its neurons their fallback angle, so each brain settles into a sector of the rings
+    const hubOfBrain = {}; if (brainsIn) brainsIn.forEach((b, i) => { const h = pageById[(D.centers || [])[i]]; if (h) hubOfBrain[b.id] = h; });
+    const placed = new Set(), origin = new Set();   // a neuron sitting at the centre has no direction to offer its neighbours
+    let R = 0, prevOut = 0;
+    ringIds.forEach((rid, ri) => {
+      const ps = byRing.get(rid), g = prev[rid] || { id: 'ring-' + rid, ring: rid, ox: 0, oy: 0 };
+      const ws = ps.map(slotW), need = d3.sum(ws) + ps.length * 8, inward = Math.max(0, ...ps.map(synReach));
+      // only a lone centre neuron sits at the origin; when the centre lobe is hidden the first visible ring keeps a positive radius
+      const loneCenter = rid === 0 && ps.length === 1 && ps[0].isCenter;
+      R = ri === 0 ? (loneCenter ? 0 : Math.max(need / (2 * Math.PI), 60)) : Math.max(need / (2 * Math.PI), R + prevOut + inward + OB.gap + OB.band);
+      // target angles: the mean direction of the already placed neighbours; a network brain's hub; else nothing (spread evenly in dataset order)
+      const want = ps.map(p => {
+        let sx = 0, sy = 0;
+        p.neighbors.forEach(x => { if (x.l.kind === 'pp' && placed.has(x.n) && !origin.has(x.n)) { sx += Math.cos(x.n.ga); sy += Math.sin(x.n.ga); } });
+        if (!sx && !sy && brainsIn) { const h = hubOfBrain[lobeById[p.lobe]?.brain]; if (h && h !== p && placed.has(h) && !origin.has(h)) { sx = Math.cos(h.ga); sy = Math.sin(h.ga); } }
+        return sx || sy ? Math.atan2(sy, sx) : NaN;
+      });
+      const free = want.map((a, i) => Number.isNaN(a) ? i : -1).filter(i => i >= 0);
+      free.forEach((i, j) => { want[i] = -Math.PI / 2 + (2 * Math.PI * j) / free.length; });
+      let ang;
+      if (R === 0) ang = want;
+      else {
+        // sort by wanted angle (dataset order breaks ties), cut the circle at the widest gap, unwrap, fit, then check the wrap-around gap
+        const order = d3.range(ps.length).sort((i, j) => want[i] - want[j] || i - j), n = order.length;
+        let cut = 0, widest = -1;
+        for (let m = 0; m < n; m++) { const a = want[order[m]], b = want[order[(m + 1) % n]] + (m === n - 1 ? 2 * Math.PI : 0); if (b - a > widest) { widest = b - a; cut = (m + 1) % n; } }
+        const seq = order.slice(cut).concat(order.slice(0, cut)), base = want[seq[0]];
+        const t = seq.map(i => { let a = want[i] - base; while (a < 0) a += 2 * Math.PI; return a; });
+        const pitch = i => (ws[i] + 8) / R, off = [0];
+        for (let m = 1; m < n; m++) off.push(off[m - 1] + (pitch(seq[m - 1]) + pitch(seq[m])) / 2);
+        const span = off[n - 1] + (pitch(seq[n - 1]) + pitch(seq[0])) / 2;
+        let fit = pava(t.map((a, m) => a - off[m])).map((y, m) => y + off[m]);
+        // if the fitted ring closes on itself (its first and last neuron overlap across the cut), fall back to even spacing around the mean want
+        if (fit[n - 1] - fit[0] > 2 * Math.PI - (pitch(seq[n - 1]) + pitch(seq[0])) / 2) { const mid = (fit[0] + fit[n - 1]) / 2; fit = off.map(o => mid - span / 2 + o + pitch(seq[0]) / 2); }
+        ang = new Array(n); seq.forEach((i, m) => { ang[i] = fit[m] + base; });
+      }
+      ps.forEach((p, i) => {
+        p.ga = ang[i]; p.gux = Math.cos(p.ga); p.guy = Math.sin(p.ga);
+        if (R === 0) { p.gux = 0; p.guy = -1; p.ga = -Math.PI / 2; origin.add(p); }   // the lone centre: ladder down, sub-neurons up
+        p.gx = p.gux * R + (g.ox || 0) + (p.gox || 0); p.gy = p.guy * R + (g.oy || 0) + (p.goy || 0);
+        placeKidsRadial(p); p.grp = g; placed.add(p);
+      });
+      g.loci = ps; g.hubOn = null; g.on = ps.length > 0; g.R = R; g.ws = ws;
+      g.kidR = Math.max(0, ...ps.map(kidOut)); g.inward = inward;
+      const lobesIn = new Set(ps.map(p => p.lobe));
+      g.color = lobesIn.size === 1 ? lobeById[ps[0].lobe]?.color || '#9aa' : '#a7b2cc';
+      g.name = (D.rings && (D.rings[rid] || D.rings[String(rid)])) || (ri === 0 && ps.length === 1 && ps[0].isCenter ? ps[0].title : lobesIn.size === 1 ? lobeById[ps[0].lobe].name : `ring ${rid}`);
+      prevOut = R === 0 ? Math.max(g.kidR, ...ps.map(synReach)) : g.kidR;   // the lone centre's own ladder runs outward too
+      orbits.push(g);
+    });
+    // rings whose lobes are all hidden keep their group (and a hand-moved or saved offset) for when they come back; they draw, fit and report nothing
+    const shown = new Set(ringIds);
+    [...new Set(pages.filter(p => !isChild(p)).map(ringOf))].filter(rid => !shown.has(rid)).forEach(rid => {
+      const g = prev[rid] || { id: 'ring-' + rid, ring: rid, ox: 0, oy: 0 };
+      g.loci = []; g.on = false; g.hubOn = null; g.R = g.R || 0; g.ws = []; g.kidR = 0; g.inward = 0; orbits.push(g);
+    });
+    orbits.sort((a, b) => a.ring - b.ring);
+    if (snap) snapToMap();
+  }
+  const relayout = snap => { if (genome()) layoutGenome(snap); else if (cell()) layoutCell(snap); else if (tree()) layoutTree(snap); else if (table()) layoutTable(snap); else if (coil()) layoutCoil(snap); else if (orbit()) layoutOrbit(snap); };
   let mouseW = null;                      // cursor in world units, for lobe hover while labels are off
   // tools: 'select' = left-drag draws a marquee and moves neurons; 'pan' = left-drag pans (the classic behaviour)
   let mode = 'select', spaceDown = false;
   const multi = new Set();              // marquee-selected neurons; dragging one moves them all
   let marquee = null;                   // {x0,y0,x1,y1} in screen px while a marquee is open
   let drag = null;                      // {nodes:[{n,x,y}], sx, sy} while neurons are being moved
-  let W = 0, H = 0, dpr = 1;
+  let W = 0, H = 0, dpr = 1, searchBox = null;
   let activeNodes = [], activeLinks = [];
 
   // a sub-neuron is shown only while both its own lobe and its parent's lobe are on
@@ -682,6 +763,7 @@
     const first = W === 0;
     dpr = Math.min(window.devicePixelRatio || 1, 2);
     W = canvas.clientWidth; H = canvas.clientHeight;
+    { const qb = document.getElementById('q'), r = qb && (qb.closest('.search, form, label') || qb).getBoundingClientRect(); searchBox = r ? { l: r.left, r: r.right, t: r.top, b: r.bottom } : null; }   // table cards keep clear of the search bar
     canvas.width = W * dpr; canvas.height = H * dpr;
     if(previousWidth>0&&previousHeight>0&&W>0&&H>0){
       const ratio=Math.min(W,H)/Math.min(previousWidth,previousHeight);
@@ -716,6 +798,8 @@
     const mx = genome() ? 120 : tree() ? 60 : cell() ? 40 : radial() ? 120 : brainsIn ? 260 : 150, my = genome() ? 150 : tree() ? 80 : cell() ? 40 : radial() ? 120 : brainsIn ? 260 : 170;
     // the table is fitted as a whole: a sparse brain's chairs cover only part of a ring that still has to be on screen, with room behind the chairs for sub-neurons
     if (coil()) { xs.push(-coilR * 1.15, coilR * 1.15); ys.push(-coilR * CL.ry, coilR * CL.ry + 14 + coilR * CL.body + 16); }
+    // the orbit layout fits every ring around its own (hand-moved) centre, with room past it for the sub-neurons standing outside their parents
+    if (orbit()) orbits.filter(g => g.on).forEach(g => { const tr = g.R + OB.band / 2 + g.kidR, ox = g.ox || 0, oy = g.oy || 0; xs.push(ox - tr, ox + tr); ys.push(oy - tr, oy + tr); });
     if (table()) { const tr = tableR + TB.ring / 2 + Math.max(0, ...seats.filter(c => c.on).map(c => c.kidR)); xs.push(-tr, tr); ys.push(-tr, tr); }
     // the family tree fits its plates and spines, which stand above and beside the neurons
     if (tree()) branches.filter(b => b.on).forEach(b => { xs.push(b.x0, b.x1); ys.push(b.py - T.plateH, b.y1); });
@@ -781,6 +865,10 @@
   const ctrlOf = l => {
     if (!mapped() || l.kind !== 'pp') return null;   // only page links are drawn curved; synapse bolts (sx) stay straight, so their pulses must too
     const a = l.source, b = l.target, mx = (a.x + b.x) / 2, my = (a.y + b.y) / 2;
+    if (orbit()) {   // between rings a connection runs straight, like a spoke; along one ring it bows a little toward the centre
+      if (sameGroup(a, b)) { const g = grpOf(a), dx = mx - (g.ox || 0), dy = my - (g.oy || 0), d = Math.hypot(dx, dy) || 1, pull = Math.min(60, 6 + Math.hypot(b.x - a.x, b.y - a.y) * 0.2); return [mx - dx / d * pull, my - dy / d * pull]; }
+      return [mx, my];
+    }
     if (table()) {   // chords across the table bow toward the empty centre; neighbours at one seat take a shallow arc just inside the ring
       if (sameGroup(a, b)) { const d = Math.hypot(mx, my) || 1, pull = Math.min(90, 10 + Math.hypot(b.x - a.x, b.y - a.y) * 0.3); return [mx - mx / d * pull, my - my / d * pull]; }
       return [mx * 0.3, my * 0.3];
@@ -1035,6 +1123,35 @@
     ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic';
   }
 
+  function drawOrbit(titleVis, tl) {
+    const sw = px => px / k, mobile = window.innerWidth <= 900;
+    orbits.filter(g => g.on).forEach((g, ri) => {
+      if (g.R === 0) return;
+      const mRad = mouseW ? Math.hypot(mouseW[0] - (g.ox || 0), mouseW[1] - (g.oy || 0)) : -1;   // measured from this ring's own (possibly moved) centre
+      // the orbit: a faint ring, a little brighter where neurons sit densely
+      ctx.beginPath(); ctx.arc(g.ox || 0, g.oy || 0, g.R, 0, Math.PI * 2);
+      ctx.lineWidth = sw(1); ctx.strokeStyle = rgba(g.color, 0.22); ctx.stroke();
+      ctx.beginPath(); ctx.arc(g.ox || 0, g.oy || 0, g.R, 0, Math.PI * 2);
+      ctx.lineWidth = OB.band; ctx.strokeStyle = rgba(g.color, 0.035); ctx.stroke();
+      // ring card: name and count just outside the ring, at screen size, clear of the sub-neurons standing outside it. The cards step
+      // around the rings (a quarter turn each, starting at the top) so they never stack on one radius; hover keeps a card while labels are off
+      const hovered = mouseW && Math.abs(mRad - g.R) < OB.band / 2 + 20;
+      const v = titleVis * Math.max(tl, hovered ? 1 : 0.55); if (v < 0.02) return;
+      const am = -Math.PI / 2 - (ri % 4) * Math.PI / 2 - Math.floor(ri / 4) * 0.5, cx = Math.cos(am), cy = Math.sin(am);
+      const out = OB.band / 2 + depthF * g.kidR + 14, [sx, sy] = toScreen((g.ox || 0) + cx * (g.R + out), (g.oy || 0) + cy * (g.R + out));
+      const fs = Math.max(9.5, Math.min(mobile ? 11 : 13, 9 + Math.sqrt(g.loci.length))), fs2 = Math.max(9, fs - 3), lh = fs + 2, block = lh + fs2 + 4;
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0); ctx.textAlign = cx > 0.2 ? 'left' : cx < -0.2 ? 'right' : 'center'; ctx.textBaseline = 'middle';
+      const top = sy - block / 2 + (cy * block) / 2;
+      ctx.font = `600 ${fs}px 'Clash Display', 'Satoshi', sans-serif`; ctx.fillStyle = rgba(g.color, 0.9 * v);
+      ctx.fillText(g.name, sx, top + lh / 2);
+      const subs = d3.sum(g.loci, p => p.children.filter(pageOn).length), syn = d3.sum(g.loci, p => p.nSyn);
+      ctx.font = `500 ${fs2}px 'Satoshi', sans-serif`; ctx.fillStyle = rgba('#a7b2cc', 0.8 * v);
+      ctx.fillText(`${g.loci.length}${subs ? `+${subs}` : ''} · ${syn}`, sx, top + lh + 4 + fs2 / 2);
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0); ctx.translate(tx, ty); ctx.scale(k, k);
+    });
+    ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic';
+  }
+
   function drawTable(titleVis, tl) {
     const sw = px => px / k, hw = TB.ring / 2, mobile = window.innerWidth <= 900;
     const sector = (r0, r1, a0, a1) => { ctx.beginPath(); ctx.arc(0, 0, r1, a0, a1); ctx.arc(0, 0, r0, a1, a0, true); ctx.closePath(); };
@@ -1080,16 +1197,30 @@
         const kidsUnder = c.loci.flatMap(p => p.children.filter(x => pageOn(x) && Math.abs(Math.sin(Math.atan2(x.gy - soy, x.gx - sox) - c.am)) * (tableR + hw) * k < 48));
         if (kidsUnder.length) reach = Math.max(reach, clamp01((k - 1.05) / 0.1) * depthF * Math.max(...kidsUnder.map(x => (x.r / Math.pow(k, 0.45) + sw(6)) * k + ctx.measureText(x.title).width * k + 10)));
       }
-      const push = 14 + lblF * clamp01((k - 0.45) / 0.25) * reach, ox = cx * push, oy = cy * push;
+      // the push follows the labels' own visibility: a label drawn at all (even faint, as the table first fits) is a label the card must not sit on
+      let push = 14 + (lblF > 0.01 ? reach : 0);   // full measured reach as soon as the label paints; the on-screen fallback below still applies
       const fs = Math.max(9.5, Math.min(mobile ? 11 : 14, 10 + Math.sqrt(c.loci.length) * 1.2)), fs2 = Math.max(9, fs - 3);
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
       ctx.textAlign = cx > 0.2 ? 'left' : cx < -0.2 ? 'right' : 'center'; ctx.textBaseline = 'middle';
-      const lines = wrapTitle(c.name, 150), lh = fs + 2, block = lines.length * lh + fs2 + 4, top = sy + oy - block / 2 + (cy * block) / 2;
-      ctx.font = `600 ${fs}px 'Clash Display', 'Satoshi', sans-serif`; ctx.fillStyle = rgba(c.color, 0.9 * v);
-      lines.forEach((ln, i) => ctx.fillText(ln, sx + ox, top + lh / 2 + i * lh));
-      const subs = d3.sum(c.loci, p => p.children.filter(pageOn).length), syn = d3.sum(c.loci, p => p.nSyn);
+      ctx.font = `600 ${fs}px 'Clash Display', 'Satoshi', sans-serif`;   // wrap with the card's own font, not the label font measured above
+      const lines = wrapTitle(c.name, 150), lh = fs + 2, block = lines.length * lh + fs2 + 4;
+      // the card stays on screen: on a small screen at a far fit the labels outreach the table itself, so when stepping past them would put the card
+      // off screen (or under the search bar) it keeps its near place instead; a card beside the labels beats one nobody can see
+      const subs = d3.sum(c.loci, p => p.children.filter(pageOn).length), syn = d3.sum(c.loci, p => p.nSyn), count = `${c.loci.length}${subs ? `+${subs}` : ''} · ${syn}`;
+      let bw = Math.max(...lines.map(ln => ctx.measureText(ln).width));   // the card is as wide as its widest line, title or count, each in its own font
+      ctx.font = `500 ${fs2}px 'Satoshi', sans-serif`; bw = Math.max(bw, ctx.measureText(count).width); ctx.font = `600 ${fs}px 'Clash Display', 'Satoshi', sans-serif`;
+      const al = ctx.textAlign === 'left' ? 0 : ctx.textAlign === 'right' ? 1 : 0.5;
+      const place = d => { const x = sx + cx * d, t = sy + cy * d - block / 2 + (cy * block) / 2, l = x - bw * al, r = x + bw * (1 - al);
+        // a card in the search bar's columns is fine wholly above it or wholly below it (6 px clear), never across it
+        const clear = !(searchBox && l < searchBox.r && r > searchBox.l) || t + block <= searchBox.t - 6 || t >= searchBox.b + 6;
+        return { x, t, ok: l >= 8 && r <= W - 8 && t >= 8 && clear && t + block <= H - 56 }; };
+      let at = place(push); if (!at.ok && push > 14) { push = 14; at = place(14); }
+      if (!at.ok) { ctx.setTransform(dpr, 0, 0, dpr, 0, 0); ctx.translate(tx, ty); ctx.scale(k, k); return; }   // neither place fits: no card rather than one across the search bar or off screen
+      const px = at.x, top = at.t;
+      ctx.fillStyle = rgba(c.color, 0.9 * v);
+      lines.forEach((ln, i) => ctx.fillText(ln, px, top + lh / 2 + i * lh));
       ctx.font = `500 ${fs2}px 'Satoshi', sans-serif`; ctx.fillStyle = rgba('#a7b2cc', 0.8 * v);
-      ctx.fillText(`${c.loci.length}${subs ? `+${subs}` : ''} · ${syn}`, sx + ox, top + lines.length * lh + 4 + fs2 / 2);
+      ctx.fillText(count, px, top + lines.length * lh + 4 + fs2 / 2);
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0); ctx.translate(tx, ty); ctx.scale(k, k);
     });
     ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic';
@@ -1139,7 +1270,7 @@
     const inView = (x, y) => x > vx0 && x < vx1 && y > vy0 && y < vy1;
 
     // maps: the karyogram, the cells or the tree (bars, membranes, plates, titles) stand in for the lobe halos
-    if (genome()) drawKaryogram(clamp01((1.7 - k) / 0.6), labelF); else if (cell()) drawCells(clamp01((1.7 - k) / 0.6), labelF); else if (tree()) drawTree(clamp01((1.7 - k) / 0.6), labelF); else if (table()) drawTable(clamp01((1.7 - k) / 0.6), labelF); else if (coil()) drawCoil(clamp01((1.7 - k) / 0.6), labelF);
+    if (genome()) drawKaryogram(clamp01((1.7 - k) / 0.6), labelF); else if (cell()) drawCells(clamp01((1.7 - k) / 0.6), labelF); else if (tree()) drawTree(clamp01((1.7 - k) / 0.6), labelF); else if (table()) drawTable(clamp01((1.7 - k) / 0.6), labelF); else if (coil()) drawCoil(clamp01((1.7 - k) / 0.6), labelF); else if (orbit()) drawOrbit(clamp01((1.7 - k) / 0.6), labelF);
     // lobe halos
     if (lobeVis > 0 && !mapped()) {
       ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic';
@@ -1585,6 +1716,7 @@ ctx.shadowBlur=0;});
     else if (e.key === 'f' || e.key === 'F') toggleLayout('tree');
     else if (e.key === 't' || e.key === 'T') toggleLayout('table');
     else if (e.key === 'z' || e.key === 'Z') toggleLayout('coil');   // C belongs to the NNCCG Charts drawer
+    else if (e.key === 'o' || e.key === 'O') toggleLayout('orbit');   // Ctrl/Cmd+O (open a layout file) is handled with the chords
   });
 
   function select(n, opts = {}) {
@@ -1741,6 +1873,7 @@ ctx.shadowBlur=0;});
     tree: svg('<circle cx="5" cy="12" r="2.2"/><circle cx="19" cy="5.5" r="2.2"/><circle cx="19" cy="12" r="2.2"/><circle cx="19" cy="18.5" r="2.2"/><path d="M7.2 12h4.8M12 12V5.5h4.8M12 12h4.8M12 12v6.5h4.8"/>'),
     coil: svg('<ellipse cx="12" cy="15" rx="7" ry="2.6"/><path d="M12 17.6v3M8.5 20.6h7M12 12.4l-2.2-3.4 1.6-1.2L9.6 4.2M12 12.4l2.4-3 -1.2-1.4L15.4 4M12 12.4V7.5l1-1.6"/>'),
     table: svg('<circle cx="12" cy="12" r="8.5"/><circle cx="12" cy="12" r="4" opacity="0.45"/><path d="M12 3.5v2.2M20.5 12h-2.2M12 20.5v-2.2M3.5 12h2.2M18 6l-1.6 1.6M18 18l-1.6-1.6M6 18l1.6-1.6M6 6l1.6 1.6"/>'),
+    orbit: svg('<circle cx="12" cy="12" r="1.6" fill="currentColor"/><circle cx="12" cy="12" r="5.2" opacity="0.7"/><circle cx="12" cy="12" r="9.2" opacity="0.45"/><circle cx="12" cy="6.8" r="1.3" fill="currentColor"/><circle cx="16.5" cy="15" r="1.3" fill="currentColor"/><circle cx="4.1" cy="8.4" r="1.3" fill="currentColor"/><circle cx="19.5" cy="7.6" r="1.3" fill="currentColor"/><circle cx="9.4" cy="20.8" r="1.3" fill="currentColor"/>'),
     labels: svg('<path d="M3 12V5a2 2 0 0 1 2-2h7l9 9-9 9-9-9z"/><circle cx="7.5" cy="7.5" r="1.2" fill="currentColor" stroke="none"/>'),
     save: svg('<path d="M5 3.5h11l3.5 3.5v12a1.5 1.5 0 0 1-1.5 1.5H5A1.5 1.5 0 0 1 3.5 19V5A1.5 1.5 0 0 1 5 3.5z"/><path d="M7.5 3.5v5h8v-5"/><rect x="7" y="13" width="10" height="7.5" rx="1"/>'),
     shot: svg('<path d="M4 8h3l2-3h6l2 3h3a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V9a1 1 0 0 1 1-1z"/><circle cx="12" cy="13.5" r="3.5"/>'),
@@ -1753,7 +1886,7 @@ ctx.shadowBlur=0;});
     <button class="tool-mode" data-mode="pan" title="Pan (H): drag to pan the view" aria-label="Pan tool">✋</button>
     <button id="release-pins" title="Release hand-placed neurons (R)" aria-label="Release hand-placed neurons">⟲</button>`);
   railGroup('view-tools', 'View', `<button id="labels-toggle" title="Labels on/off (L): when off, only the neuron or lobe under the cursor keeps its label" aria-label="Toggle labels" aria-pressed="true">${ICON.labels}</button>
-    <button id="layout-menu" title="Layouts: neural, genome (G), karyocyte (K), family tree (F) or table (T)" aria-label="Choose a layout" aria-haspopup="menu" aria-expanded="false">${ICON.neural}</button>`);
+    <button id="layout-menu" title="Layouts: neural, genome (G), karyocyte (K), family tree (F), table (T), coil (Z) or orbit (O)" aria-label="Choose a layout" aria-haspopup="menu" aria-expanded="false">${ICON.neural}</button>`);
   railGroup('file-tools', 'File', `<button id="save-layout" title="Saved layouts (Ctrl+S): keep this arrangement in the browser, download it as a file or open one" aria-label="Saved layouts" aria-haspopup="dialog" aria-expanded="false">${ICON.save}</button>
     <button id="shot" title="Screenshot (S): save the current view as a PNG" aria-label="Save a screenshot">${ICON.shot}</button>`);
   const zoomCtl = document.getElementById('zoom-ctl'); zoomCtl.classList.add('rail-group'); zoomCtl.before(rail); rail.appendChild(zoomCtl);
@@ -1812,6 +1945,7 @@ ctx.shadowBlur=0;});
     ['tree', 'tree-toggle', 'Family tree', 'the hub as ancestor, each lobe a branch, neurons the generations', 'F'],
     ['table', 'table-toggle', 'Table', 'a round table with no head: lobes as seats, neurons as chairs', 'T'],
     ['coil', 'coil-toggle', 'Coil', 'a Tesla coil in discharge: the hub in the toroid, lobes as streamers, neurons as kinks', 'Z'],
+    ['orbit', 'orbit-toggle', 'Orbit', 'the hub at the centre, neurons on concentric rings, chains of connections as spokes', 'O'],
   ];
   const layFly = flyout('layout-flyout', 'Layouts', 'menu');
   layFly.innerHTML = `<div class="fly-head">Layouts</div>` + LAYOUT_ROWS.map(([l, id, name, what, key]) => `<button class="fly-row lay" id="${id}" data-layout="${l}" role="menuitemradio" aria-checked="false" aria-pressed="false">${ICON[l]}<span class="fly-text"><b>${name}</b><small>${what}</small></span>${key ? `<kbd>${key}</kbd>` : ''}</button>`).join('');
@@ -1820,7 +1954,7 @@ ctx.shadowBlur=0;});
   // labels toggle: a tool button and a switch in the lobes panel drive the same state
   const switches = document.querySelector('#lobes .switches');
   if (switches) {
-    [['layout-coil', 'Coil layout'], ['layout-table', 'Table layout'], ['layout-tree', 'Family tree layout'], ['layout-cell', 'Karyocyte layout'], ['layout-genome', 'Genome layout']].forEach(([id, name]) => { const g = document.createElement('label'); g.className = 'switch'; g.innerHTML = `<input type="checkbox" id="${id}"><span>${name}</span>`; switches.prepend(g); });
+    [['layout-orbit', 'Orbit layout'], ['layout-coil', 'Coil layout'], ['layout-table', 'Table layout'], ['layout-tree', 'Family tree layout'], ['layout-cell', 'Karyocyte layout'], ['layout-genome', 'Genome layout']].forEach(([id, name]) => { const g = document.createElement('label'); g.className = 'switch'; g.innerHTML = `<input type="checkbox" id="${id}"><span>${name}</span>`; switches.prepend(g); });
     const l = document.createElement('label'); l.className = 'switch'; l.innerHTML = '<input type="checkbox" id="labels" checked><span>Labels</span>'; switches.prepend(l);
   }
   // layout switch: a tool button, a switch in the lobes panel and a key drive the same state per map; the hash carries it so a link can open a map
@@ -1830,13 +1964,14 @@ ctx.shadowBlur=0;});
     tree: { btn: 'tree-toggle', sw: 'layout-tree', key: 'F', flash: 'family tree layout · the hub is the ancestor, each lobe a branch, neurons and sub-neurons the generations', noun: 'branches', one: 'branch', unit: 'neuron', hint: 'family tree layout · the hub is the ancestor, each plate a lobe, each row a neuron' },
     table: { btn: 'table-toggle', sw: 'layout-table', key: 'T', flash: 'table layout · a round table with no head · seats are lobes, chairs are neurons, synapses lie on the table', noun: 'seats', one: 'seat', unit: 'chair', hint: 'table layout · each seat is a lobe, each chair a neuron, nobody sits at the head' },
     coil: { btn: 'coil-toggle', sw: 'layout-coil', key: 'Z', flash: 'coil layout · a Tesla coil in discharge · the hub stands in the toroid, every lobe is a streamer, every neuron a kink of the bolt', noun: 'streamers', one: 'streamer', unit: 'kink', hint: 'coil layout · the hub stands in the toroid, each streamer is a lobe, each kink a neuron' },
+    orbit: { btn: 'orbit-toggle', sw: 'layout-orbit', key: 'O', flash: 'orbit layout · the hub at the centre, neurons on concentric rings, connections running outward like spokes', noun: 'rings', one: 'ring', unit: 'neuron', hint: 'orbit layout · the hub sits at the centre and each ring is a stage outward' },
   };
   // the rail button, the flyout rows and the lobes-panel switches all show the same layout
   function syncLayoutUI() {
     Object.entries(LAYOUT_UI).forEach(([id, u]) => { const on = layout === id, b = document.getElementById(u.btn); if (b) { b.classList.toggle('on', on); b.setAttribute('aria-pressed', String(on)); } const c = document.getElementById(u.sw); if (c) c.checked = on; });
     const nb = document.getElementById('neural-toggle'); if (nb) { nb.classList.toggle('on', !mapped()); nb.setAttribute('aria-pressed', String(!mapped())); }
     layFly.querySelectorAll('.lay').forEach(b => b.setAttribute('aria-checked', b.getAttribute('aria-pressed')));
-    layoutMenuBtn.innerHTML = ICON[layout]; layoutMenuBtn.classList.toggle('on', mapped()); layoutMenuBtn.title = `Layouts: ${mapped() ? LAYOUT_UI[layout].one.replace(/^\w/, c => c.toUpperCase()) + ' map' : 'neural'} now · G, K, F, T or Z jump to a map`;
+    layoutMenuBtn.innerHTML = ICON[layout]; layoutMenuBtn.classList.toggle('on', mapped()); layoutMenuBtn.title = `Layouts: ${mapped() ? LAYOUT_UI[layout].one.replace(/^\w/, c => c.toUpperCase()) + ' map' : 'neural'} now · G, K, F, T, Z or O jump to a map`;
   }
   let layoutFitTimer;
   function setLayout(l, opts = {}) {
@@ -2051,7 +2186,7 @@ ctx.shadowBlur=0;});
     if (pinned && lvl === 'Lobes') { hint.textContent = `${plural(pinned, 'neuron')} placed by hand · R releases them`; return; }
     const u = mapped() ? LAYOUT_UI[layout] : null;
     if (u && mapMoved() && lvl === 'Lobes') { hint.textContent = `${u.noun} moved by hand · drag a ${u.unit} to move its whole ${u.one} · R resets the map`; return; }
-    if (lvl === 'Lobes') { hint.textContent = u ? `${u.hint} · drag a ${u.unit} to move its ${u.one} · ${u.key} returns to the ${LAYOUT_NAME[offLayout(layout)]} layout` : mode === 'select' ? 'scroll to zoom · drag to select · mouse3 or Space to pan · drag a neuron to move it · G, K, F, T or Z for the genome, karyocyte, family tree, table or coil layout' : 'scroll to zoom · drag to pan · click a neuron · V for select mode · G, K, F, T or Z for the genome, karyocyte, family tree, table or coil layout'; return; }
+    if (lvl === 'Lobes') { hint.textContent = u ? `${u.hint} · drag a ${u.unit} to move its ${u.one} · ${u.key} returns to the ${LAYOUT_NAME[offLayout(layout)]} layout` : mode === 'select' ? 'scroll to zoom · drag to select · mouse3 or Space to pan · drag a neuron to move it · G, K, F, T, Z or O for the genome, karyocyte, family tree, table, coil or orbit layout' : 'scroll to zoom · drag to pan · click a neuron · V for select mode · G, K, F, T, Z or O for the genome, karyocyte, family tree, table, coil or orbit layout'; return; }
     hint.textContent = lvl === 'Lobes' ? 'scroll to zoom · drag to pan · click a neuron' : lvl === 'Neurons' ? (hasSubs ? 'keep zooming: sub-neurons unfold at 0.85×, synapses at 1.5×' : 'keep zooming: synapses explode at 1.5×') : lvl === 'Sub-neurons' ? 'small satellites are sub-neurons · zoom past 1.5× to explode synapses' : 'dots are synapses · diamonds are sources · dashed lines fire across neurons';
   }
   function updateStats() {
@@ -2108,7 +2243,13 @@ ctx.shadowBlur=0;});
   setTimeout(() => document.getElementById('loading').classList.add('done'), 1500);
   // deep link from another brain or a shared URL: #n=<page id>
   const openHash = () => { const m = /[#&]n=([^&]+)/.exec(location.hash); if (!m) return; const n = pageById[decodeURIComponent(m[1])]; if (n) { ensureVisible(n); select(n, { by: 'hash' }); } };
-  setTimeout(openHash, 1700);
+  // The initial restore waits for the layout to settle. If the visitor has already acted by then (a click, a tap or a key: a selection,
+  // a closed panel, a layout switch, a zoom), their choice wins: restoring late would reopen a panel they had just closed or recentre their view.
+  const bootHash = location.hash, ACTS = ['pointerdown', 'keydown', 'wheel'], bootRestore = { at: performance.now(), fired: false };
+  let bootActed = false;
+  const acted = e => { if (e.isTrusted) bootActed = true; };
+  ACTS.forEach(t => window.addEventListener(t, acted, { capture: true, passive: true }));
+  setTimeout(() => { bootRestore.fired = true; ACTS.forEach(t => window.removeEventListener(t, acted, { capture: true })); if (!bootActed && location.hash === bootHash && !selected) openHash(); }, 1700);
   window.addEventListener('hashchange', openHash);
   // read-only hooks for the QA scripts in tools/ (screen position of a neuron, current marquee selection)
   window.MINDBLOWN_RENDERER = Object.freeze({
@@ -2142,7 +2283,7 @@ ctx.shadowBlur=0;});
   };
   window.dispatchEvent(new Event('mindblown:randonaut-ready'));
   // END MB RANDONAUT ADAPTER
-  window.MINDBLOWN_QA = { screenOf: id => { const n = pageById[id]; return n ? toScreen(n.x, n.y) : null; }, selection: () => [...multi].map(n => n.id), pinned: () => pages.filter(n => n.pinned).map(n => n.id), mode: () => mode, labels: () => labelsOn, layout: () => layout, setLayout: l => setLayout(l, { noFit: true }), chromosomes: () => chromos.filter(c => c.on).map(c => ({ id: c.id, x: c.x, top: c.top, bot: c.bot, loci: c.loci.map(p => p.id), hub: c.hubOn ? c.hubOn.id : null })), groups: () => groupsNow().filter(g => g.on).map(g => ({ id: g.id, loci: g.loci.map(p => p.id), hub: g.hubOn ? g.hubOn.id : null, ox: g.ox || 0, oy: g.oy || 0 })), cells: () => cells.filter(c => c.on).map(c => ({ id: c.id, cx: c.cx, cy: c.cy, Rn: c.Rn, Rc: c.Rc })), seats: () => seats.filter(c => c.on).map(c => ({ id: c.id, a0: c.a0, a1: c.a1, loci: c.loci.map(p => p.id) })), tableR: () => tableR, streamers: () => streamers.filter(c => c.on).map(c => ({ id: c.id, name: c.name, on: c.on, n: c.loci.length, hub: c.hubOn ? c.hubOn.id : null, root: c.root, fork: c.fork, chains: c.chains.map(x => x.pts.length - 1), ox: c.ox || 0, oy: c.oy || 0 })), coilR: () => coilR, sparks: () => pulses.filter(p => p.spark).length, trees: () => trees.filter(t => t.on).map(t => ({ id: t.id, x: t.x, y: t.y, w: t.w, h: t.h })), sealed: () => syns.filter(sealed).map(s => s.id), solve: (id, text) => !!synById[id] && solve(synById[id], text), screenshot, captureLayout, applyLayout, layouts: readLayouts, saveLayout, flyout: () => (openFly ? openFly.f.id : null) };
+  window.MINDBLOWN_QA = { screenOf: id => { const n = pageById[id]; return n ? toScreen(n.x, n.y) : null; }, selection: () => [...multi].map(n => n.id), pinned: () => pages.filter(n => n.pinned).map(n => n.id), mode: () => mode, labels: () => labelsOn, layout: () => layout, setLayout: l => setLayout(l, { noFit: true }), chromosomes: () => chromos.filter(c => c.on).map(c => ({ id: c.id, x: c.x, top: c.top, bot: c.bot, loci: c.loci.map(p => p.id), hub: c.hubOn ? c.hubOn.id : null })), groups: () => groupsNow().filter(g => g.on).map(g => ({ id: g.id, loci: g.loci.map(p => p.id), hub: g.hubOn ? g.hubOn.id : null, ox: g.ox || 0, oy: g.oy || 0 })), cells: () => cells.filter(c => c.on).map(c => ({ id: c.id, cx: c.cx, cy: c.cy, Rn: c.Rn, Rc: c.Rc })), seats: () => seats.filter(c => c.on).map(c => ({ id: c.id, a0: c.a0, a1: c.a1, loci: c.loci.map(p => p.id) })), tableR: () => tableR, bootRestore: () => ({ ...bootRestore }), rings: () => orbits.filter(g => g.on).map(g => ({ id: g.id, ring: g.ring, R: g.R, loci: g.loci.map(p => p.id) })), streamers: () => streamers.filter(c => c.on).map(c => ({ id: c.id, name: c.name, on: c.on, n: c.loci.length, hub: c.hubOn ? c.hubOn.id : null, root: c.root, fork: c.fork, chains: c.chains.map(x => x.pts.length - 1), ox: c.ox || 0, oy: c.oy || 0 })), coilR: () => coilR, sparks: () => pulses.filter(p => p.spark).length, trees: () => trees.filter(t => t.on).map(t => ({ id: t.id, x: t.x, y: t.y, w: t.w, h: t.h })), sealed: () => syns.filter(sealed).map(s => s.id), solve: (id, text) => !!synById[id] && solve(synById[id], text), screenshot, captureLayout, applyLayout, layouts: readLayouts, saveLayout, flyout: () => (openFly ? openFly.f.id : null) };
 })();
 
 /* BEGIN MB RANDONAUT MODULE */
