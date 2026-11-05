@@ -165,6 +165,7 @@
   // 'table' (T) seats the brain around a round table with no head.
   // 'coil' (Z, for zap) makes the brain a Tesla coil in discharge: the hub in the toroid, every lobe a lightning streamer, every neuron a kink of it.
   const LAYOUTS = ['neural', 'genome', 'cell', 'tree', 'table', 'coil'];
+  const LAYOUT_NAME = { neural: 'neural', genome: 'genome', cell: 'karyocyte', tree: 'family tree', table: 'table', coil: 'coil' };
   // the page's default layout, then the link hash on top of it: a shared `#layout=` link (including `layout=neural`) opens as sent whatever the page defaults to
   const pageLayout = LAYOUTS.includes(OPT.layout) ? OPT.layout : 'neural';
   const hashLayout = () => { const m = /[#&]layout=(\w+)\b/.exec(location.hash); return m && LAYOUTS.includes(m[1]) ? m[1] : null; };
@@ -1837,9 +1838,11 @@ ctx.shadowBlur=0;});
     }
     updateHint();
   }
-  const toggleLayout = l => setLayout(layout === l ? 'neural' : l);
+  // switching a map off returns to the page's own default layout (MINDBLOWN_OPTIONS.layout); switching the default itself off goes to neural
+  function offLayout(l) { return l === pageLayout ? 'neural' : pageLayout; }   // hoisted: updateHint can run before this line
+  const toggleLayout = l => setLayout(layout === l ? offLayout(l) : l);
   layFly.querySelectorAll('.lay').forEach(b => b.addEventListener('click', () => { setLayout(b.dataset.layout); hideFly(); }));
-  Object.entries(LAYOUT_UI).forEach(([id, u]) => document.getElementById(u.sw)?.addEventListener('change', e => setLayout(e.target.checked ? id : 'neural')));
+  Object.entries(LAYOUT_UI).forEach(([id, u]) => document.getElementById(u.sw)?.addEventListener('change', e => setLayout(e.target.checked ? id : offLayout(id))));
   if (mapped()) setLayout(layout, { silent: true }); else syncLayoutUI();   // initial state from MINDBLOWN_OPTIONS or the hash, without the toast
   function setLabels(on, quiet) {
     labelsOn = on;
@@ -2025,7 +2028,7 @@ ctx.shadowBlur=0;});
     if (pinned && lvl === 'Lobes') { hint.textContent = `${plural(pinned, 'neuron')} placed by hand · R releases them`; return; }
     const u = mapped() ? LAYOUT_UI[layout] : null;
     if (u && mapMoved() && lvl === 'Lobes') { hint.textContent = `${u.noun} moved by hand · drag a ${u.unit} to move its whole ${u.one} · R resets the map`; return; }
-    if (lvl === 'Lobes') { hint.textContent = u ? `${u.hint} · drag a ${u.unit} to move its ${u.one} · ${u.key} returns to the neural layout` : mode === 'select' ? 'scroll to zoom · drag to select · mouse3 or Space to pan · drag a neuron to move it · G, K, F, T or Z for the genome, karyocyte, family tree, table or coil layout' : 'scroll to zoom · drag to pan · click a neuron · V for select mode · G, K, F, T or Z for the genome, karyocyte, family tree, table or coil layout'; return; }
+    if (lvl === 'Lobes') { hint.textContent = u ? `${u.hint} · drag a ${u.unit} to move its ${u.one} · ${u.key} returns to the ${LAYOUT_NAME[offLayout(layout)]} layout` : mode === 'select' ? 'scroll to zoom · drag to select · mouse3 or Space to pan · drag a neuron to move it · G, K, F, T or Z for the genome, karyocyte, family tree, table or coil layout' : 'scroll to zoom · drag to pan · click a neuron · V for select mode · G, K, F, T or Z for the genome, karyocyte, family tree, table or coil layout'; return; }
     hint.textContent = lvl === 'Lobes' ? 'scroll to zoom · drag to pan · click a neuron' : lvl === 'Neurons' ? (hasSubs ? 'keep zooming: sub-neurons unfold at 0.85×, synapses at 1.5×' : 'keep zooming: synapses explode at 1.5×') : lvl === 'Sub-neurons' ? 'small satellites are sub-neurons · zoom past 1.5× to explode synapses' : 'dots are synapses · diamonds are sources · dashed lines fire across neurons';
   }
   function updateStats() {
