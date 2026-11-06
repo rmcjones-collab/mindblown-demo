@@ -44,10 +44,17 @@
     try{E.evaluate(next,ids);}catch(e){status(e.message);return false;}
     past.push(copy(state));if(past.length>50)past.shift();future=[];state=next;render();if(message)status(message);return true;
   }
+  function nextModifierId(){
+    const used=new Set(state.modifiers.map(m=>m.id));
+    // At most 12 IDs are occupied. Wrap before incrementing past the safe-integer
+    // boundary and skip occupied IDs, including after restoring a maximum ID.
+    do{serial=serial>=Number.MAX_SAFE_INTEGER?1:serial+1;}while(used.has('M'+serial));
+    return 'M'+serial;
+  }
   function place(point){
     if(state.modifiers.length>=12){status('Remove a modifier before adding another (limit 12).');cancel();return;}
     const target=$('modifier-target').value;
-    const next=copy(state);next.modifiers.push({id:'M'+(++serial),target,gain:1,x:point[0],y:point[1]});
+    const next=copy(state);next.modifiers.push({id:nextModifierId(),target,gain:1,x:point[0],y:point[1]});
     commit(next,'Modifier placed. Adjust its signal below. Drag its canvas handle to reposition.');cancel();
   }
   $('modifier-place').onclick=()=>{placing=!placing;$('modifier-place').textContent=placing?'Cancel placement':'Place on canvas';document.body.classList.toggle('modifier-placing',placing);status(placing?'Click an open area of the canvas to place the controller. Escape cancels.':'Placement cancelled.');};
@@ -92,14 +99,25 @@
       label.append(output,range);card.append(title,label,button('Focus target',()=>R.focus(m.target)),button('Remove',()=>{const n=copy(state);n.modifiers=n.modifiers.filter(x=>x.id!==m.id);commit(n,'Modifier removed. Explicit connections remain until removed or reset.');}));
       $('modifier-list').append(card);
       let moved=false;   // a drag that moved the handle must not also open the panel on release
-      const handle=button(m.id,()=>{if(moved){moved=false;return;}active=m.id;panel.hidden=false;launch.setAttribute('aria-expanded','true');card.scrollIntoView({block:'nearest'});range.focus();});
+      const handle=button(m.id,e=>{if(moved&&e.detail!==0){moved=false;return;}moved=false;active=m.id;panel.hidden=false;launch.setAttribute('aria-expanded','true');card.scrollIntoView({block:'nearest'});range.focus();});
       handle.className='modifier-node';handle.dataset.modifier=m.id;handle.setAttribute('aria-label',`Modifier ${m.id}, target ${names.get(m.target)}. Arrow keys move.`);
       let drag=null;
-      handle.onpointerdown=e=>{e.stopPropagation();moved=false;drag={x:e.clientX,y:e.clientY,world:R.toWorld(e.clientX,e.clientY),origin:[m.x,m.y],before:copy(state)};handle.setPointerCapture(e.pointerId);};
-      handle.onpointermove=e=>{if(!drag)return;if(Math.hypot(e.clientX-drag.x,e.clientY-drag.y)>3)drag.moved=true;   // latched: a drag that returns to its start is still a drag
+      function finishDrag(e,aborted=false){
+        if(!drag||e.pointerId!==drag.pointerId)return;
+        const d=drag;drag=null;   // pointerup/cancel may be followed by lostpointercapture
+        if(aborted){m.x=d.origin[0];m.y=d.origin[1];moved=true;return;}   // rollback without changing either history stack
+        if(d.moved||Math.hypot(e.clientX-d.x,e.clientY-d.y)>3){
+          moved=true;
+          if(JSON.stringify(state)!==JSON.stringify(d.before)){past.push(d.before);if(past.length>50)past.shift();future=[];$('modifier-undo').disabled=false;$('modifier-redo').disabled=true;}
+        }
+      }
+      handle.onpointerdown=e=>{if(drag||!e.isPrimary||e.button!==0)return;e.stopPropagation();moved=false;drag={pointerId:e.pointerId,x:e.clientX,y:e.clientY,world:R.toWorld(e.clientX,e.clientY),origin:[m.x,m.y],before:copy(state)};handle.setPointerCapture(e.pointerId);};
+      handle.onpointermove=e=>{if(!drag||e.pointerId!==drag.pointerId)return;if(Math.hypot(e.clientX-drag.x,e.clientY-drag.y)>3)drag.moved=true;   // latched: a drag that returns to its start is still a drag
       if(!drag.moved)return;   // under the threshold the handle stays put, so a click never nudges it
       const p=R.toWorld(e.clientX,e.clientY);m.x=drag.origin[0]+(p[0]-drag.world[0]);m.y=drag.origin[1]+(p[1]-drag.world[1]);};
-      handle.onpointerup=e=>{if(!drag)return;if(drag.moved||Math.hypot(e.clientX-drag.x,e.clientY-drag.y)>3){moved=true;if(JSON.stringify(state)!==JSON.stringify(drag.before)){past.push(drag.before);if(past.length>50)past.shift();future=[];$('modifier-undo').disabled=false;$('modifier-redo').disabled=true;}}drag=null;};
+      handle.onpointerup=e=>finishDrag(e);
+      handle.onpointercancel=e=>finishDrag(e,true);
+      handle.onlostpointercapture=e=>finishDrag(e,true);
       handle.onkeydown=e=>{const v={ArrowLeft:[-15,0],ArrowRight:[15,0],ArrowUp:[0,-15],ArrowDown:[0,15]}[e.key];if(!v)return;e.preventDefault();const n=copy(state),x=n.modifiers.find(x=>x.id===m.id);x.x+=v[0];x.y+=v[1];commit(n);overlay.querySelector(`[data-modifier="${m.id}"]`).focus();};
       overlay.append(handle);
     }

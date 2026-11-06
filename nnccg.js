@@ -173,10 +173,10 @@
     filters: { lobes: null }, options: { measure: 'count', includeSubNeurons: true }, order
   }));
   const valid = d => d && typeof d.id === 'string' && /^[\w-]{1,64}$/.test(d.id) && typeof d.type === 'string' && typeof d.name === 'string' && d.name.length <= 120;
-  let defs = (() => { try { const v = JSON.parse(sessionStorage.getItem(KEY) || 'null'); return Array.isArray(v) && v.length && v.every(valid) ? v : starter(); } catch { return starter(); } })();
+  let defs = (() => { try { const ss = window.sessionStorage; const v = JSON.parse(ss.getItem(KEY) || 'null'); return Array.isArray(v) && v.length && v.every(valid) ? v : starter(); } catch { return starter(); } })();
   // Add missing starters once on upgrade, preserving the phase-0 definition and unknown future chart types.
   for (const d of starter()) if (!defs.some(x => x.id === d.id)) defs.push(d);
-  const persist = () => { try { sessionStorage.setItem(KEY, JSON.stringify(defs)); return true; } catch { return false; } };   // storage may be unavailable; the drawer still works for this page view
+  const persist = () => { try { const ss = window.sessionStorage; ss.setItem(KEY, JSON.stringify(defs)); return true; } catch { return false; } };   // storage may be unavailable; the drawer still works for this page view
 
   // ---------- helpers ----------
   const mctx = document.createElement('canvas').getContext('2d'); mctx.font = '11px Satoshi, system-ui, sans-serif';
