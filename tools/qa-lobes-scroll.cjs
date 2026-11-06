@@ -9,11 +9,12 @@ if (!url) throw new Error('Usage: node tools/qa-lobes-scroll.cjs <brain-url>');
     const page = await browser.newPage();
     const errors = [];
     page.on('pageerror', e => errors.push(e.message));
+    page.on('console', m => { if (m.type() === 'error') errors.push(m.text()); });
     for (const viewport of [
       { width: 1440, height: 900 }, { width: 1280, height: 500 },
       { width: 375, height: 667 }, { width: 667, height: 375 },
       { width: 844, height: 390 }, { width: 568, height: 320 },
-      { width: 320, height: 568 }
+      { width: 320, height: 568 }, { width: 220, height: 240 }
     ]) {
       await page.setViewportSize(viewport);
       await page.goto(url, { waitUntil: 'load' });
@@ -24,12 +25,20 @@ if (!url) throw new Error('Usage: node tools/qa-lobes-scroll.cjs <brain-url>');
         const lobes = document.getElementById('lobes');
         if (!dock || !lobes) return false;
         const a = dock.getBoundingClientRect(), b = lobes.getBoundingClientRect();
+        const rail = document.querySelector('.rail')?.getBoundingClientRect();
+        const clearRail = dock.classList.contains('mb-in-rail') || !rail ||
+          a.right <= rail.left || a.left >= rail.right || a.bottom <= rail.top || a.top >= rail.bottom;
         return a.left >= 0 && a.right <= innerWidth && a.top >= 0 && a.bottom <= innerHeight &&
+          clearRail &&
           (a.right <= b.left || a.left >= b.right || a.bottom <= b.top || a.top >= b.bottom);
       }, null, { timeout: 3000 });
       await clearDock();
       if (viewport.width <= 900) await page.locator('.lobes-head').click();
       await clearDock();
+      if (viewport.width < 264) {
+        console.log(`PASS ${viewport.width}x${viewport.height}: fallback stays on-screen and clear of collapsed/open Lobes`);
+        continue;   // clearance-only edge case, too short for the 64px stress-list fixture
+      }
       // Synthetic fixture exists only in this isolated test page, never saved.
       await page.evaluate(() => {
         const list = document.querySelector('#lobe-list');

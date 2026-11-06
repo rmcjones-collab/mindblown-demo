@@ -2176,11 +2176,12 @@ ctx.shadowBlur=0;});
     } else (Array.isArray(s.pins) ? s.pins : []).forEach(id => { const p = ownPage(id); if (p && !isChild(p)) { p.pinned = true; p.fx = p.x; p.fy = p.y; } });
     refreshForces(); rebuild(false); sim.alpha(mapped() ? 0.5 : 0.12);   // the free layout was an equilibrium when saved, so a gentle restart keeps it
     refreshHome();
-    const kk = Math.min(K_MAX, Math.max(kMin, num(s.view && s.view.k, 0)));
-    if (kk > 0 && s.view) {
+    const savedK = num(s.view && s.view.k, 0);
+    if (savedK > 0) {
+      const kk = Math.min(K_MAX, Math.max(kMin, savedK));
       // the saved centre point stays at the screen centre; a view saved below the live floor is raised to it and run through the soft bounds, since zoom.transform skips them
       let t = d3.zoomIdentity.translate(W / 2 - num(s.view.cx) * kk, H / 2 - num(s.view.cy) * kk).scale(kk);
-      if (kk !== num(s.view.k, 0)) t = zoom.constrain()(t, [[0, 0], [W, H]], null);
+      if (kk !== savedK) t = zoom.constrain()(t, [[0, 0], [W, H]], null);
       atHome = false; d3.select(canvas).transition().duration(700).ease(d3.easeCubicInOut).call(zoom.transform, t);
     }
     const sel = ownPage(s.selected); if (sel && visible(sel)) select(sel, { noZoom: true, by: 'restore' });
@@ -2334,7 +2335,7 @@ ctx.shadowBlur=0;});
     focus: (id, opts) => { const n=pageById[id]; if(n) {ensureVisible(n);select(n, { by: (opts && opts.by) || 'api' });} },
     selected: () => selected?.kind === 'page' ? selected.id : null,
     engine: 'canonical',
-    camera: () => ({ k, tx, ty, kMin, kMax: K_MAX, home: home && { ...home }, atHome, homing, free: freeRect() }),   // read-only camera state for tools/qa-zoom.cjs
+    camera: () => ({ k, tx, ty, kMin, kMax: K_MAX, home: home && { ...home }, atHome, homing, free: freeRect(), fittedFree: free && { ...free }, bounds: bbox && { ...bbox } }),   // read-only fitted geometry and camera state for QA
     lobes: () => lobes.map(l => ({ id: l.id, name: l.name, color: l.color, on: !!lobeOn[l.id] }))   // read-only lobe state for overlays (NNCCG)
   });
   // BEGIN MB RANDONAUT ADAPTER

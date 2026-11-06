@@ -284,3 +284,5 @@ input { font: inherit; }
 .rail #zoom-ctl button { font-size: 19px; }
 /* short windows: tighter rail so Tools, View, File and Zoom still clear the header */
 @media (max-height: 640px) { .rail { gap: 6px; } .rail .zoom-ctl { padding: 3px; } .rail .zoom-ctl button { height: 30px; } }
+/* Very narrow windows reserve the launcher and its gaps beside Lobes and the rail. */
+@media (max-width: 315px) { #lobes { width: calc(100vw - 136px); } }

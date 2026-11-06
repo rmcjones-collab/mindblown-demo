@@ -30,6 +30,8 @@ async function pinch(cdp, cx, cy, from, to, steps = 12) {
   await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
 }
 const atHome = (c, eps = 1) => c.home && near(c.k, c.home.kk, c.home.kk * 0.01) && near(c.tx, c.home.tx, eps) && near(c.ty, c.home.ty, eps);
+const centred = c => c.bounds && near((c.bounds.x0 + c.bounds.x1) / 2 * c.k + c.tx, c.free.cx, 1) &&
+  near((c.bounds.y0 + c.bounds.y1) / 2 * c.k + c.ty, c.free.cy, 1);
 (async () => {
   const b = await chromium.launch({ channel: 'chromium' });
   for (const layout of layouts) for (const [w, h, touch] of VIEWS) {
@@ -52,6 +54,7 @@ const atHome = (c, eps = 1) => c.home && near(c.k, c.home.kk, c.home.kk * 0.01) 
     await p.goto(`${url}#layout=${layout}`); await waitForHome(p);
     let c = await cam(p), s = await onScreen(p);
     check(c.home && c.atHome && atHome(c), `${tag}: at Home after the intro (k ${c.k.toFixed(3)}, floor ${c.kMin.toFixed(3)})`);
+    check(centred(c), `${tag}: fitted layout geometry is centred in the free area`);
     check(c.home && near(c.kMin, c.home.kk * 0.75, 1e-8), `${tag}: floor is exactly 75 % of Home`);
     check(s.n > 0 && s.off === 0, `${tag}: every visible neuron on screen at Home (${s.n - s.off}/${s.n})`);
     const f = await p.evaluate(() => window.__firstCam);
@@ -62,12 +65,27 @@ const atHome = (c, eps = 1) => c.home && near(c.k, c.home.kk, c.home.kk * 0.01) 
     for (let i = 0; i < 2; i++) { await p.locator('#z-in').click(); await p.waitForTimeout(400); }
     c = await cam(p);
     check(c.k > c.home.kk * 2 && !c.atHome, `${tag}: gesture starts zoomed above Home`);
+    await p.evaluate(() => {
+      window.__qaReturnFrames = [];
+      window.__qaTrackReturn = true;
+      const sample = () => {
+        if (!window.__qaTrackReturn) return;
+        const c = MINDBLOWN_RENDERER.camera();
+        if (c.homing && c.home && c.k > c.home.kk * 0.76 && c.k < c.home.kk * 0.99 && window.__qaReturnFrames.length < 1000)
+          window.__qaReturnFrames.push([c.k, c.tx, c.ty]);
+        requestAnimationFrame(sample);
+      };
+      sample();
+    });
     const { cx, cy } = c.free;
     if (!touch) { await p.mouse.move(cx, cy); for (let i = 0; i < 40; i++) await p.mouse.wheel(0, 300); }
     else { const cdp = await ctx.newCDPSession(p); for (let i = 0; i < 3; i++) { await pinch(cdp, cx, cy, 140, 40); await p.waitForTimeout(120); } }
     let settled = true; try { await waitForHome(p); } catch { settled = false; }
+    const frames = await p.evaluate(() => { window.__qaTrackReturn = false; return window.__qaReturnFrames; });
+    check(frames.length > 0,
+      `${tag}: return to Home has intermediate animated frames (${frames.length})`);
     c = await cam(p); s = await onScreen(p);
-    check(settled && atHome(c) && s.off === 0, `${tag}: ${touch ? 'pinch' : 'wheel'} out settles on Home (k ${c.k.toFixed(3)} vs ${c.home.kk.toFixed(3)}, off screen ${s.off})`);
+    check(settled && atHome(c) && s.n > 0 && s.off === 0, `${tag}: ${touch ? 'pinch' : 'wheel'} out settles on Home (k ${c.k.toFixed(3)} vs ${c.home.kk.toFixed(3)}, off screen ${s.off})`);
     // zoom in on a far neuron, then back out with the − button
     const far = await p.evaluate(() => { const R = window.MINDBLOWN_RENDERER, c = document.querySelector('canvas'); let best = null, d = -1; R.nodes().forEach(n => { const q = R.screenOf(n.id); if (!q) return; const dd = Math.hypot(q[0] - c.clientWidth / 2, q[1] - c.clientHeight / 2); if (dd > d) { d = dd; best = n.id; } }); return best; });
     await p.evaluate(id => window.MINDBLOWN_RENDERER.focus(id), far); await p.waitForTimeout(1400); c = await cam(p);
@@ -86,7 +104,7 @@ const atHome = (c, eps = 1) => c.home && near(c.k, c.home.kk, c.home.kk * 0.01) 
     const sized = await p2.waitForFunction(([W, H]) => innerWidth === W && innerHeight === H, [h, w], { timeout: 15000 }).then(() => true, () => false);
     const rested = sized && await waitForHome(p2).then(() => true, () => false);
     c = await cam(p2); s = await onScreen(p2);
-    check(sized && rested && c.atHome && atHome(c) && s.off === 0, `${tag}: rotated to ${h}x${w} lands on the new Home (${sized ? '' : 'viewport never reached that size; '}${rested ? '' : 'camera did not settle; '}off screen ${s.off})`);
+    check(sized && rested && c.atHome && atHome(c) && s.n > 0 && s.off === 0, `${tag}: rotated to ${h}x${w} lands on the new Home (${sized ? '' : 'viewport never reached that size; '}${rested ? '' : 'camera did not settle; '}off screen ${s.off})`);
     check(errs.length === 0, `${tag}: no page or console errors${errs.length ? ' — ' + errs.join(' | ') : ''}`);
     await ctx.close();
   }
