@@ -11,12 +11,25 @@ if (!url) throw new Error('Usage: node tools/qa-lobes-scroll.cjs <brain-url>');
     page.on('pageerror', e => errors.push(e.message));
     for (const viewport of [
       { width: 1440, height: 900 }, { width: 1280, height: 500 },
-      { width: 375, height: 667 }, { width: 667, height: 375 }
+      { width: 375, height: 667 }, { width: 667, height: 375 },
+      { width: 844, height: 390 }, { width: 568, height: 320 },
+      { width: 320, height: 568 }
     ]) {
       await page.setViewportSize(viewport);
       await page.goto(url, { waitUntil: 'load' });
       await page.locator('#lobe-list .lobe').first().waitFor({ state: 'attached' });
+      // The owl must not intercept the collapsed header or expanded panel.
+      const clearDock = () => page.waitForFunction(() => {
+        const dock = document.getElementById('mb-rando-dock');
+        const lobes = document.getElementById('lobes');
+        if (!dock || !lobes) return false;
+        const a = dock.getBoundingClientRect(), b = lobes.getBoundingClientRect();
+        return a.left >= 0 && a.right <= innerWidth && a.top >= 0 && a.bottom <= innerHeight &&
+          (a.right <= b.left || a.left >= b.right || a.bottom <= b.top || a.top >= b.bottom);
+      }, null, { timeout: 3000 });
+      await clearDock();
       if (viewport.width <= 900) await page.locator('.lobes-head').click();
+      await clearDock();
       // Synthetic fixture exists only in this isolated test page, never saved.
       await page.evaluate(() => {
         const list = document.querySelector('#lobe-list');
@@ -46,7 +59,18 @@ if (!url) throw new Error('Usage: node tools/qa-lobes-scroll.cjs <brain-url>');
       assert.equal(await page.locator('#lobes').evaluate(panel => panel.scrollTop), 0);
       assert.ok(await page.locator('#lobes').evaluate(panel => panel.scrollHeight > panel.clientHeight),
         'stress options must overflow the panel');
-      await page.locator('#lobes').hover({ position: { x: 10, y: 10 } });
+      // A short phone can place the floating Randonaut shortcut over one corner.
+      // Use a genuinely exposed point, not force/DOM scrolling, so this still tests real wheel input.
+      const point = await page.locator('#lobes').evaluate(panel => {
+        const r = panel.getBoundingClientRect();
+        for (const fy of [0.3, 0.6, 0.8]) for (const fx of [0.7, 0.5, 0.3]) {
+          const x = r.left + r.width * fx, y = r.top + r.height * fy;
+          if (document.elementFromPoint(x, y)?.closest('#lobes') === panel) return { x, y };
+        }
+        return null;
+      });
+      assert.ok(point, 'Lobes must expose a real pointer target for scrolling');
+      await page.mouse.move(point.x, point.y);
       await page.mouse.wheel(0, 2000);
       await page.waitForFunction(() => {
         const panel = document.querySelector('#lobes');

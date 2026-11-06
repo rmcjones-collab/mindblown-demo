@@ -1,5 +1,7 @@
 /* MindBlown — explode the Brain into lobes, neurons and synapses. */
 (() => {
+  // Browser initialization is optional: Node consumers can import the sampling module below.
+  if (typeof document === 'undefined') return;
   // ---------- nav: one dropdown of every brain, in the header on every page ----------
   // Source, in order: window.MINDBLOWN_NAV ([{label, href, color?, sep?}]), or an existing <nav class="brains"> of links; the current page is marked by href or .on
   (() => {
@@ -634,7 +636,12 @@
     orbits.sort((a, b) => a.ring - b.ring);
     if (snap) snapToMap();
   }
-  const relayout = snap => { if (genome()) layoutGenome(snap); else if (cell()) layoutCell(snap); else if (tree()) layoutTree(snap); else if (table()) layoutTable(snap); else if (coil()) layoutCoil(snap); else if (orbit()) layoutOrbit(snap); };
+  const relayout = snap => {
+    // Every map records its viewport, including aspect-independent Orbit,
+    // Periodic and Structured maps which never call rowsFor().
+    layoutAspect = (W || 1600) / (H || 900);
+    if (genome()) layoutGenome(snap); else if (cell()) layoutCell(snap); else if (tree()) layoutTree(snap); else if (table()) layoutTable(snap); else if (coil()) layoutCoil(snap); else if (orbit()) layoutOrbit(snap);
+  };
   let mouseW = null;                      // cursor in world units, for lobe hover while labels are off
   // tools: 'select' = left-drag draws a marquee and moves neurons; 'pan' = left-drag pans (the classic behaviour)
   let mode = 'select', spaceDown = false;
@@ -785,7 +792,7 @@
     if(previousWidth>0&&previousHeight>0&&W>0&&H>0){
       if (homing) { if (refreshHome()) goHome(600, d3.easeCubicOut); }   // a resize under the intro (a phone's address bar) retargets it instead of stranding the camera mid-flight
       else if (atHome && refreshHome()) d3.select(canvas).interrupt().call(zoom.transform, homeT());   // an untouched camera follows Home (rotation, address bar, window drag)
-      else {
+      else if (W !== previousWidth || H !== previousHeight) {
         const ratio=Math.min(W,H)/Math.min(previousWidth,previousHeight);
         refreshHome();
         d3.select(canvas).interrupt().call(zoom.transform,d3.zoomIdentity.translate(W/2+(tx-previousWidth/2)*ratio,H/2+(ty-previousHeight/2)*ratio).scale(Math.min(K_MAX, Math.max(kMin, k*ratio))));
@@ -815,7 +822,10 @@
     .on('zoom', ev => { k = ev.transform.k; tx = ev.transform.x; ty = ev.transform.y; updateLevel(); })
     // fully out means Home: a gesture or zoom button that ends past the whole brain settles back on it, centred. A gesture that interrupts a
     // transition in flight ends that transition first (homing is still set, and d3 hands it the gesture's event), which must not settle again
-    .on('end', ev => { if (ev.sourceEvent && home && !atHome && !homing && k < home.kk * 0.98) fitAll(450); })
+    .on('end', ev => {
+      if (!homing && isHome()) atHome = true;   // a press/release without movement still follows Home
+      if (ev.sourceEvent && home && !atHome && !homing && k < home.kk * 0.98) fitAll(450);
+    })
     .filter(ev => {
       if (ev.type === 'wheel' || ev.type.startsWith('touch')) return !ev.ctrlKey || ev.type === 'wheel';
       if (ev.type !== 'mousedown') return !ev.button;
@@ -869,7 +879,7 @@
   function fitAll(dur = 900) { if (refreshHome()) goHome(dur); }
   // after Home moved under a resting camera (a lobe shown or hidden): a camera at the old Home follows to the new one, and a camera the new
   // floor overtook settles the way a gesture past Home does; the floor alone never moves the camera until the next gesture clamps it
-  function settleToHome() { if (home && !homing && (atHome || k < kMin)) fitAll(450); }
+  function settleToHome() { if (home && (homing || atHome || k < kMin)) fitAll(450); }
   function zoomTo(n, kk, dur = 1100) {
     const mobile = window.innerWidth <= 900;
     const panelW = mobile ? 0 : 380;
@@ -2300,7 +2310,7 @@ ctx.shadowBlur=0;});
     goHome(1600, d3.easeCubicOut);
     // once the forces cool, a camera nobody has touched (still at Home, no press on the canvas, no selection) refits silently if the brain drifted from the box it was fitted to
     let pressed = false; canvas.addEventListener('pointerdown', e => { if (e.isTrusted) pressed = true; }, { capture: true, passive: true });
-    sim.on('end.home', () => { if (!atHome || pressed || bootActed || selected || homing) return; const g = fitTransform(); if (Math.hypot(g.tx - tx, g.ty - ty) > 6 || Math.abs(g.kk / k - 1) > 0.03) fitAll(500); });
+    sim.on('end.home', () => { const g = refreshHome(); if (!g || (!atHome && !homing) || pressed || selected) return; if (homing || Math.hypot(g.tx - tx, g.ty - ty) > 0.5 || Math.abs(g.kk / k - 1) > 1e-6) fitAll(500); });
   })();
   updateLevel();
   requestAnimationFrame(draw);
@@ -2324,7 +2334,7 @@ ctx.shadowBlur=0;});
     focus: (id, opts) => { const n=pageById[id]; if(n) {ensureVisible(n);select(n, { by: (opts && opts.by) || 'api' });} },
     selected: () => selected?.kind === 'page' ? selected.id : null,
     engine: 'canonical',
-    camera: () => ({ k, tx, ty, kMin, kMax: K_MAX, home: home && { ...home }, atHome, free: freeRect() }),   // read-only camera state for tools/qa-zoom.cjs
+    camera: () => ({ k, tx, ty, kMin, kMax: K_MAX, home: home && { ...home }, atHome, homing, free: freeRect() }),   // read-only camera state for tools/qa-zoom.cjs
     lobes: () => lobes.map(l => ({ id: l.id, name: l.name, color: l.color, on: !!lobeOn[l.id] }))   // read-only lobe state for overlays (NNCCG)
   });
   // BEGIN MB RANDONAUT ADAPTER
@@ -2441,7 +2451,7 @@ ctx.shadowBlur=0;});
       #mb-rando-journal small{display:block;color:#aebbd1}
       #mb-rando-dock :focus-visible,#mb-rando-panel :focus-visible{outline:2px solid var(--mb-accent);outline-offset:3px}
       @media(max-width:900px){
-        #mb-rando-dock:not(.mb-in-rail),#mb-rando-dock.mb-shell:not(.mb-in-rail){left:12px;bottom:auto;top:var(--mb-rando-top,144px)}
+        #mb-rando-dock:not(.mb-in-rail),#mb-rando-dock.mb-shell:not(.mb-in-rail){left:var(--mb-rando-left,204px);bottom:auto;top:var(--mb-rando-top,144px)}
         #mb-rando-panel,#mb-rando-panel.mb-shell{left:12px;right:12px;width:auto;bottom:auto;top:calc(var(--mb-rando-top,144px) + 54px);max-height:calc(100dvh - var(--mb-rando-top,144px) - 66px)}
       }
       @media(prefers-reduced-motion:reduce){.mb-rando-track i{transition:none}}
@@ -2508,6 +2518,11 @@ ctx.shadowBlur=0;});
       const top = doc.getElementById('top');
       const y = Math.max(8, Math.min((top?.getBoundingClientRect().bottom || 124) + 10, w.innerHeight - 120));
       doc.documentElement.style.setProperty('--mb-rando-top', y + 'px');
+      // Keep the fallback beside the Lobes footprint, including its collapsed
+      // header. Below the search box at x=12 overlaps Lobes on short phones.
+      const lobes = doc.getElementById('lobes')?.getBoundingClientRect();
+      const x = lobes ? lobes.right + 12 : 12;
+      doc.documentElement.style.setProperty('--mb-rando-left', Math.max(12, Math.min(x, w.innerWidth - 56)) + 'px');
       placeDock(); placeCard();
     }
     w.addEventListener('resize', place);
