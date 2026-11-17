@@ -1,0 +1,40 @@
+name: ci
+# Read-only baseline checks for this public repo. No secrets, no deploys, no writes.
+on:
+  pull_request:
+  push:
+    branches: [main]
+permissions:
+  contents: read
+jobs:
+  baseline:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0             # full history for the secret scan
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Secret scan (entire history)
+        run: docker run --rm -v "$PWD:/repo" ghcr.io/gitleaks/gitleaks:v8.30.1 git /repo --redact --no-banner
+      - name: Datasets come only from the fictional generators
+        # data.js, life-data.js and programming-data.js must be exactly what the
+        # fictional generators produce, so no hand-edited or real data can slip in.
+        run: |
+          set -e
+          python3 build_demo_data.py
+          python3 build_life_demo_data.py
+          python3 build_programming_demo_data.py
+          git diff --exit-code --stat -- data.js life-data.js programming-data.js
+      - name: JavaScript parses
+        run: |
+          set -e
+          n=0
+          while IFS= read -r f; do node --check "$f"; n=$((n+1)); done < <(git ls-files '*.js' '*.cjs' '*.mjs' | grep -v '/vendor/')
+          echo "parsed $n files"
