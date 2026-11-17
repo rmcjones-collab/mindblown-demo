@@ -36,7 +36,7 @@ Fictional cast and hosts that must not change meaning: Sam Vale (`sam.vale@examp
 | Docstring coverage below 80% | Not a goal; comment what you touch. |
 | Inherit child lobe from parent | Declined; cross-lobe parents are intentional (`pageOn` checks both lobes). |
 | d3@7 without SRI | Acceptable; if pinning, pin all three repos' HTML in one change. |
-| Real GitHub namespace in demo URLs | Fixed to `git.example.test` during the security review; keep it that way. |
+| Real GitHub namespace in demo URLs | Fixed to `git.example.test` in data and generators during the security review; keep it that way. Nav links to already-public `rmcjones-collab.github.io/mindblown-brains/` pages are the one allowed exception (see CLAUDE.md rule 1). |
 
 ## Demo-specific backlog
 
